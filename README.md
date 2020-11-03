@@ -44,13 +44,13 @@ If the project location is not persistent that the script should be modified to 
 
 The script can be downloaded and executed dynamically using the following command:
 
-    bash <(curl -s -L https://github.com/matthewb66/detect_rescan/blob/main/detect_rescan.sh) DETECT_OPTIONS
+    bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) DETECT_OPTIONS
 
 where DETECT_OPTIONS are the standard Synopsys Detect options.
 
 Alternatively the script can be downloaded and saved locally using:
 
-    curl -s -L https://github.com/matthewb66/detect_rescan/blob/main/detect_rescan.sh > detect_rescan.sh
+    curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh > detect_rescan.sh
 
 # INTEGRATIONS & SUPPORT
 
