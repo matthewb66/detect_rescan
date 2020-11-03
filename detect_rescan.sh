@@ -177,13 +177,13 @@ run_detect_offline() {
 BOM_FILES=()
 BOM_HASHES=()
 proc_bom_files() {
-    if stat --printf='' $RUNDIR/bdio/*.jsonld 2>/dev/null
+    if [ $(ls -1 $RUNDIR/bdio/*.jsonld 2>/dev/null | wc -l) -le 0 ]
     then
         return -1
     fi
     for bom in $RUNDIR/bdio/*.jsonld
     do
-        CKSUM=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | cksum | cut -f1 -d' '`
+        CKSUM=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' '`
         FILE="`basename $bom`"
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
@@ -533,7 +533,7 @@ check_sigscan() {
 proc_sigscan() {
     echo
     echo "detect_rescan.sh: Uploading Sig scan ..."
-    if stat --printf='' $SIGFOLDER/data/*.json 2>/dev/null
+    if [ $(ls -1 $SIGFOLDER/data/*.json 2>/dev/null | wc -l) -le 0 ]
     then
         for sigfile in $SIGFOLDER/data/*.json
         do
