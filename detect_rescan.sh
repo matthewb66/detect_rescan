@@ -149,7 +149,7 @@ run_detect_offline() {
     fi
     chmod +x $DETECT
 
-    $DETECT $ARGS --blackduck.offline.mode=true | tee $TEMPFILE
+    $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true | tee $TEMPFILE
     RET=${PIPESTATUS[0]}
     if [ $RET -ne 0 ]
     then
