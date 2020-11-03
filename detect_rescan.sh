@@ -177,12 +177,12 @@ run_detect_offline() {
 BOM_FILES=()
 BOM_HASHES=()
 proc_bom_files() {
-    if [ $(ls -1 $RUNDIR/bdio/*.jsonld 2>/dev/null | wc -l) -le 0 ]
-    then
-        return -1
-    fi
     for bom in $RUNDIR/bdio/*.jsonld
     do
+        if [ ! -r "$bom" ]
+        then
+            return -1
+        fi
         CKSUM=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' '`
         FILE="`basename $bom`"
         BOM_FILES+=("${FILE}")
@@ -528,17 +528,20 @@ check_sigscan() {
 }
 
 proc_sigscan() {
-    if [ $(ls -1 $SIGFOLDER/data 2>/dev/null | wc -l) -eq 1 ]
-    then
+    for sig in $SIGFOLDER/data/*.json
+    do
+        if [ ! -r "$sig" ]
+        then
+            return -1
+        fi
         echo "detect_rescan.sh: Uploading Signature scan ..."
-        SIGFILE=`ls -1 ${SIGFOLDER}/data/*`
         curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
         -H 'cache-control: no-cache' \
-        --data-binary "@$SIGFILE"
+        --data-binary "@$sig"
         return $?
-    fi
+    done
     return -1
 }
 
