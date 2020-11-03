@@ -18,7 +18,7 @@ DETECT=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 
 error () {
-	echo "ERROR: detect_rescan.sh: $*"
+	echo "ERROR: detect_rescan.sh: $*" >&2
 	end 1
 }
 
@@ -268,14 +268,13 @@ write_prevscanfile() {
 }
 
 upload_boms() {
-    echo
-    echo -n "detect_rescan.sh: Uploading Bom files ..."
+    echo -n "detect_rescan.sh: Uploading ${#UNMATCHED_BOMS[@]} Bom files ..."
     UPLOADED=0
     FAILED=0
     for index in ${UNMATCHED_BOMS[@]}
     do
         echo -n '.'
-        curl $CURLOPTS -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/vnd.blackducksoftware.bdio+json' \
         -H 'cache-control: no-cache' \
@@ -288,8 +287,7 @@ upload_boms() {
         fi
     done
     echo
-    echo "detect_rescan.sh: ${#UNMATCHED_BOMS[@]} Modified Bom Files to Upload: $UPLOADED Uploaded - $FAILED Failed"
-    echo
+    echo "detect_rescan.sh: $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
 }
 
 run_detect_action() {
@@ -331,7 +329,6 @@ api_call() {
 	then
 		return -1
 	fi
-
 	return $COUNT
 }
 
@@ -531,21 +528,18 @@ check_sigscan() {
 }
 
 proc_sigscan() {
-    echo
-    echo "detect_rescan.sh: Uploading Sig scan ..."
-    if [ $(ls -1 $SIGFOLDER/data/*.json 2>/dev/null | wc -l) -le 0 ]
+    if [ $(ls -1 $SIGFOLDER/data 2>/dev/null | wc -l) -eq 1 ]
     then
-        for sigfile in $SIGFOLDER/data/*.json
-        do
-            curl $CURLOPTS -X POST "${BD_URL}/api/scan/data/?mode=replace" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/ld+json' \
-            -H 'cache-control: no-cache' \
-            --data-binary "@$sigfile"
-            return $?
-        done
+        echo "detect_rescan.sh: Uploading Signature scan ..."
+        SIGFILE=`ls -1 ${SIGFOLDER}/data/*`
+        curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H 'Content-Type: application/ld+json' \
+        -H 'cache-control: no-cache' \
+        --data-binary "@$SIGFILE"
+        return $?
     fi
-    return 0
+    return -1
 }
 
 cleanup() {
@@ -616,12 +610,11 @@ then
     then
         error "wait_for_bom_completion() returned error"
     fi
-    echo
     run_detect_action 
 fi
 
 write_prevscanfile $SIGDATE
 
-cleanup
+#cleanup
 echo "detect_rescan.sh: Done"
 end 0
