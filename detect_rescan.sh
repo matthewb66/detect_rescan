@@ -18,13 +18,13 @@ DETECT=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 
 error () {
-	echo "ERROR: detect_rescan.sh: $*" >&2
-	end 1
+    echo "ERROR: detect_rescan.sh: $*" >&2
+    end 1
 }
 
 end () {
-	rm -f $TEMPFILE $DETECT
-	exit $1
+    rm -f $TEMPFILE $DETECT
+    exit $1
 }
 
 prereqs() {
@@ -169,7 +169,7 @@ run_detect_offline() {
     SIGRUN=`grep -c 'Starting the Black Duck Signature Scan' $TEMPFILE`
     if [ $SIGRUN -gt 0 ]
     then
-        SIGFOLDER=`grep 'You can view the logs at: ' $TEMPFILE | sed -e 's/^.*You can view the logs at: //g' -e "s/\'//g"`
+        SIGFOLDER=`grep 'You can view the logs at: ' $TEMPFILE | sed -e 's/^.*You can view the logs at: //g' -e "s/'//g"`
     fi
     return 0
 }
@@ -316,109 +316,109 @@ api_call() {
     else
         HEADER="$2"
     fi
-	rm -f $TEMPFILE
-	curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" 2>/dev/null >$TEMPFILE
-	if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
-	then
-		( echo API Error:
-		echo  curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
-		return -1
-	fi
+    rm -f $TEMPFILE
+    curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" 2>/dev/null >$TEMPFILE
+    if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
+    then
+        ( echo API Error:
+        echo  curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
+        return -1
+    fi
     COUNT=`cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:`
-	if [ -z "$COUNT" ]
-	then
-		return -1
-	fi
-	return $COUNT
+    if [ -z "$COUNT" ]
+    then
+        return -1
+    fi
+    return $COUNT
 }
 
 get_project() {
-	#Get  projects
-	SEARCHPROJ="${1// /+}"
-	api_call "$BD_URL/api/projects?q=name:$SEARCHPROJ" 'application/vnd.blackducksoftware.project-detail-4+json'
-	if [ $? -le 0 ]
-	then
-		return -1
-	fi
+    #Get  projects
+    SEARCHPROJ="${1// /+}"
+    api_call "$BD_URL/api/projects?q=name:$SEARCHPROJ" 'application/vnd.blackducksoftware.project-detail-4+json'
+    if [ $? -le 0 ]
+    then
+        return -1
+    fi
 
-	FOUND=false
-	SEARCHPROJ="${1// /_}"
-	PROJNAMES="`jq -r '[.items[].name]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`"
-	PROJURLS=(`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
-	PROJURL=
-	PROJNUM=0
-	for PROJ in $PROJNAMES
-	do
-#		echo DEBUG: PROJ=$PROJ SEARCHPROJ=$SEARCHPROJ >&2
-		if [ "$PROJ" == "$SEARCHPROJ" ]
-		then
-			FOUND=true
-			PROJURL="${PROJURLS[$PROJNUM]}"
-			break
-		fi
-		((PROJNUM++))
-	done
+    FOUND=false
+    SEARCHPROJ="${1// /_}"
+    PROJNAMES="`jq -r '[.items[].name]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`"
+    PROJURLS=(`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
+    PROJURL=
+    PROJNUM=0
+    for PROJ in $PROJNAMES
+    do
+#       echo DEBUG: PROJ=$PROJ SEARCHPROJ=$SEARCHPROJ >&2
+        if [ "$PROJ" == "$SEARCHPROJ" ]
+        then
+            FOUND=true
+            PROJURL="${PROJURLS[$PROJNUM]}"
+            break
+        fi
+        ((PROJNUM++))
+    done
 
-	if [ $FOUND == false ]
-	then
-		return -1
-	fi
+    if [ $FOUND == false ]
+    then
+        return -1
+    fi
 
-	echo "detect_rescan.sh: Project '$PROJ' found ..." >&2
-	echo $PROJURL
-	return 0
+    echo "detect_rescan.sh: Project '$PROJ' found ..." >&2
+    echo $PROJURL
+    return 0
 }
 
 get_version() {
-	# Get Version
-	api_call "${1//[\"]}/versions" 'application/vnd.blackducksoftware.project-detail-4+json'
-	if [ $? -le 0 ]
-	then
-		return -1
-	fi
-	
-	SEARCHVERSION="${2// /_}"
-	VERNAMES=(`jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
-	VERURLS="`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE`"
-	VERNUM=0
-	local FOUNDVERSIONURL=
-	for VERURL in $VERURLS
-	do
-		VERNAME=${VERNAMES[$VERNUM]}
-	
-		if [ "$VERNAME" == "$SEARCHVERSION" ]
-		then
-			FOUNDVERSIONURL=$VERURL
-			break 2
-		fi
-		((VERNUM++))
-	done
+    # Get Version
+    api_call "${1//[\"]}/versions" 'application/vnd.blackducksoftware.project-detail-4+json'
+    if [ $? -le 0 ]
+    then
+        return -1
+    fi
+    
+    SEARCHVERSION="${2// /_}"
+    VERNAMES=(`jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
+    VERURLS="`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE`"
+    VERNUM=0
+    local FOUNDVERSIONURL=
+    for VERURL in $VERURLS
+    do
+        VERNAME=${VERNAMES[$VERNUM]}
+    
+        if [ "$VERNAME" == "$SEARCHVERSION" ]
+        then
+            FOUNDVERSIONURL=$VERURL
+            break 2
+        fi
+        ((VERNUM++))
+    done
 
-	if [ -z "$FOUNDVERSIONURL" ]
-	then
-		return -1
-	fi
+    if [ -z "$FOUNDVERSIONURL" ]
+    then
+        return -1
+    fi
 
-	echo "detect_rescan.sh: Version '$VERSION' found ..." >&2
-	echo $FOUNDVERSIONURL
-	return 0
+    echo "detect_rescan.sh: Version '$VERSION' found ..." >&2
+    echo $FOUNDVERSIONURL
+    return 0
 }
 
 get_projver() {
-	PROJURL=$(get_project "$1")
-	if [ $? -lt 0 ]
-	then
-		return -1
-	fi
-		
-	VERURL=$(get_version "$PROJURL" "$2")
-	if [ $? -ne 0 ]
-	then
-		return -1
-	fi
-	
-	echo $VERURL
-	return 0
+    PROJURL=$(get_project "$1")
+    if [ $? -lt 0 ]
+    then
+        return -1
+    fi
+        
+    VERURL=$(get_version "$PROJURL" "$2")
+    if [ $? -ne 0 ]
+    then
+        return -1
+    fi
+    
+    echo $VERURL
+    return 0
 }
 
 wait_for_bom_completion() {
@@ -615,6 +615,6 @@ fi
 
 write_prevscanfile $SIGDATE
 
-#cleanup
+cleanup
 echo "detect_rescan.sh: Done"
 end 0
