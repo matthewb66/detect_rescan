@@ -29,7 +29,7 @@ end () {
 
 prereqs() {
     ret=0
-    for prog in md5 curl jq
+    for prog in cksum curl jq
     do
         hash $prog >/dev/null 2>&1
         if [ $? -ne 0 ]
@@ -183,10 +183,10 @@ proc_bom_files() {
     fi
     for bom in $RUNDIR/bdio/*.jsonld
     do
-        MD5=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | md5 -q`
+        CKSUM=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | cksum | cut -f1 -d' '`
         FILE="`basename $bom`"
         BOM_FILES+=("${FILE}")
-        BOM_HASHES+=("${MD5}")
+        BOM_HASHES+=("${CKSUM}")
     done
     return 0
 }
