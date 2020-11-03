@@ -535,6 +535,12 @@ proc_sigscan() {
             return -1
         fi
         echo "detect_rescan.sh: Uploading Signature scan ..."
+        echo curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H 'Content-Type: application/ld+json' \
+        -H 'cache-control: no-cache' \
+        --data-binary "@$sig"
+        
         curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
