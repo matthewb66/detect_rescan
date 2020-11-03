@@ -29,7 +29,7 @@ The script requires a bash shell to run.
 
 The following additional programs must be installed in the environment and the script will check for them:
 
-- md5
+- cksum (usually installed on MacOS & Linux)
 - curl
 - jq
 
