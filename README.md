@@ -52,6 +52,31 @@ Alternatively the script can be downloaded and saved locally using:
 
     curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh > detect_rescan.sh
 
+# USAGE
+
+The script provides 2 options in addition to the standard Synopsys Detect options as follows:
+
+    --quiet - Use to hide Synopsys Detect standard output and other script notifications
+    --report - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
+    
+The example output of the `--report` option is shown below:
+
+    BLACK DUCK OSS SUMMARY REPORT
+
+    Component Policy Status:
+    - In Violation Overidden:	0
+    - Not In Violation:		97
+    - In Violation:			1
+
+    Component Risk:
+          CRIT	HIGH	MED 	LOW 	None
+    Vulnerabilities		0	0	0	0	98
+    Licenses		-	0	63	0	35
+    Op Risk			-	10	39	12	37
+
+    See Black Duck Project at:
+    https://myserver.blackduck.synopsys.com/api/projects/c6fb44b7-9325-4b76-9a42-af1b6dda456f/versions/9afa1046-4a23-4621-9a26-19ae95d4fa89/components
+
 # INTEGRATIONS & SUPPORT
 
 The `detect_rescan.sh` script should be used in place of Synopsys Detect at the same integration points where a direct call is made to the detect.sh script.
