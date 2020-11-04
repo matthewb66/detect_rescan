@@ -67,13 +67,17 @@ process_args() {
         then
             continue
         fi
+        if [[ $arg == --detect.blackduck.signature.scanner.host.url=* ]]
+        then
+            continue
+        fi
         if [[ $arg == --blackduck.api.token=* ]]
         then
-            API_TOKEN=`echo $arg | cut -f2 -d=`==
+            API_TOKEN=$(echo $arg | cut -f2 -d=)==
         fi
         if [[ $arg == --blackduck.url=* ]]
         then
-            BD_URL=`echo $arg | cut -f2 -d=`
+            BD_URL=$(echo $arg | cut -f2 -d=)
         fi
         if [[ $arg == --detect.project.name=* ]]
         then
@@ -111,26 +115,35 @@ process_args() {
         fi
         if [[ $prevarg == --detect.source.path=* ]]
         then
-            SCANLOC=""`echo $prevarg | cut -f2 -d=`""
+            SCANLOC=$(echo $prevarg | cut -f2 -d=)
         fi
     done
     ARGS="$ARGS '$prevarg'"
     if [ ! -z "$YML" ]
     then
-        API="`grep '^blackduck.api.token' $YML`"
+        API=$(grep '^blackduck.api.token' $YML)
         if [ ! -z "API" ]
         then
-            API_TOKEN="`echo $API | cut -c2 -d' '`"
+            API_TOKEN=$(echo $API | cut -c2 -d' ')
         fi
-        URL="`grep '^blackduck.url' $YML`"
+        URL=$(grep '^blackduck.url' $YML)
         if [ ! -z "URL" ]
         then
-            BD_URL="`echo $URL | cut -c2 -d' '`"
+            BD_URL=$(echo $URL | cut -c2 -d' ')
         fi
     fi
+    if [ -z "$BD_URL" -o -z "$API_TOKEN" ]
+    then
+        return -1
+    fi
+    return 0
 }
 
 process_args $*
+if [ $? -ne 0 ]
+then
+    error "Blackduck.url or blackduck.api.token not set - unable to run detect_rescan"
+fi
 
 # echo $API_TOKEN
 # echo $BD_URL
@@ -159,17 +172,17 @@ run_detect_offline() {
     then
         return -1
     fi
-    RUNDIR="`grep 'Run directory: ' $TEMPFILE | sed -e 's/^.*Run directory: //g'`"
-    PROJECT="`grep 'Project name: ' $TEMPFILE | sed -e 's/^.*Project name: //g'`"
-    VERSION="`grep 'Project version: ' $TEMPFILE | sed -e 's/^.*Project version: //g'`"
+    RUNDIR=$(grep 'Run directory: ' $TEMPFILE | sed -e 's/^.*Run directory: //g')
+    PROJECT=$(grep 'Project name: ' $TEMPFILE | sed -e 's/^.*Project name: //g')
+    VERSION=$(grep 'Project version: ' $TEMPFILE | sed -e 's/^.*Project version: //g')
     if [ -z "$RUNDIR" -o ! -d "$RUNDIR" -o ! -d "$RUNDIR/bdio" -o -z "$PROJECT" -o -z "$VERSION" ]
     then
         return -1
     fi
-    SIGRUN=`grep -c 'Starting the Black Duck Signature Scan' $TEMPFILE`
+    SIGRUN=$(grep -c 'Starting the Black Duck Signature Scan' $TEMPFILE)
     if [ $SIGRUN -gt 0 ]
     then
-        SIGFOLDER=`grep 'You can view the logs at: ' $TEMPFILE | sed -e 's/^.*You can view the logs at: //g' -e "s/'//g"`
+        SIGFOLDER=$(grep 'You can view the logs at: ' $TEMPFILE | sed -e 's/^.*You can view the logs at: //g' -e "s/'//g")
     fi
     return 0
 }
@@ -183,8 +196,8 @@ proc_bom_files() {
         then
             return -1
         fi
-        CKSUM=`cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' '`
-        FILE="`basename $bom`"
+        CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
+        FILE=$(basename $bom)
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
     done
@@ -197,7 +210,7 @@ then
 fi
 
 curl -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
-TOKEN=`cat $TEMPFILE | tr , '\n' | cut -f4 -d\"`
+TOKEN=$(cat $TEMPFILE | tr , '\n' | cut -f4 -d\")
 if [ -z "$TOKEN" ]
 then
     error "Cannot obtain auth token"
@@ -214,8 +227,8 @@ get_prev_boms() {
         do
             if [[ $myline == VER:* ]]
             then
-                PREV_PROJ="`echo $myline|cut -f2 -d:`"
-                PREV_VER="`echo $myline|cut -f3 -d:`"
+                PREV_PROJ=$(echo $myline|cut -f2 -d:)
+                PREV_VER=$(echo $myline|cut -f3 -d:)
                 if [ "$PROJECT" != "$PREV_PROJ" -o "$VERSION" != "$PREV_VER" ]
                 then
                     break
@@ -223,8 +236,8 @@ get_prev_boms() {
             fi
             if [[ $myline == BOM:* ]]
             then
-                PREV_FILES+=("`echo $myline|cut -f2 -d:`")
-                PREV_HASHES+=("`echo $myline|cut -f3 -d:`")
+                PREV_FILES+=($(echo $myline|cut -f2 -d:))
+                PREV_HASHES+=($(echo $myline|cut -f3 -d:))
             fi
         done < "$PREVSCANFILE"
     fi
@@ -268,7 +281,7 @@ write_prevscanfile() {
 }
 
 upload_boms() {
-    echo -n "detect_rescan.sh: Uploading ${#UNMATCHED_BOMS[@]} Bom files ..."
+    echo -n "detect_rescan.sh: Uploading ${#UNMATCHED_BOMS[@]} out of ${#BOM_FILES[@]} total BOM files ..."
     UPLOADED=0
     FAILED=0
     for index in ${UNMATCHED_BOMS[@]}
@@ -291,7 +304,6 @@ upload_boms() {
 }
 
 run_detect_action() {
-    echo
     echo "detect_rescan.sh: Rerunning Detect to execute action or wait for project"
     if [ $DETECT_PROJECT -eq 0 ]
     then
@@ -324,7 +336,7 @@ api_call() {
         echo  curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
         return -1
     fi
-    COUNT=`cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:`
+    COUNT=$(cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:)
     if [ -z "$COUNT" ]
     then
         return -1
@@ -343,8 +355,8 @@ get_project() {
 
     FOUND=false
     SEARCHPROJ="${1// /_}"
-    PROJNAMES="`jq -r '[.items[].name]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`"
-    PROJURLS=(`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
+    PROJNAMES=$(jq -r '[.items[].name]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g')
+    PROJURLS=($(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
     PROJURL=
     PROJNUM=0
     for PROJ in $PROJNAMES
@@ -378,8 +390,8 @@ get_version() {
     fi
     
     SEARCHVERSION="${2// /_}"
-    VERNAMES=(`jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'`)
-    VERURLS="`jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE`"
+    VERNAMES=($(jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
+    VERURLS=$(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE)
     VERNUM=0
     local FOUNDVERSIONURL=
     for VERURL in $VERURLS
@@ -428,7 +440,7 @@ wait_for_bom_completion() {
     then
         return -1
     fi
-    STATUS="`jq -r '.upToDate' $TEMPFILE`"
+    STATUS=$(jq -r '.upToDate' $TEMPFILE)
 
     loop=0
     while [ $loop -lt 80 ]
@@ -444,9 +456,10 @@ wait_for_bom_completion() {
         then
             return -1
         fi
-        STATUS="`jq -r '.upToDate' $TEMPFILE`"
+        STATUS=$(jq -r '.upToDate' $TEMPFILE)
         ((loop++))
     done
+    echo
     return 0
 }
 
@@ -462,9 +475,9 @@ wait_for_scans() {
         then
             return -1
         fi
-        STATUSES=(`jq -r '[.items[].status[].status]' `)
+        STATUSES=($(jq -r '[.items[].status[].status]' ))
         index=0
-        for stat in `jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE`
+        for stat in $(jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE)
         do
             if [ $stat == 'ServerScanning' -a "${STATUSES[$index]}" != 'COMPLETED' ]
             then
@@ -494,8 +507,8 @@ check_sigscan() {
             do
                 if [[ $myline == VER:* ]]
                 then
-                    PREV_PROJ="`echo $myline|cut -f2 -d:`"
-                    PREV_VER="`echo $myline|cut -f3 -d:`"
+                    PREV_PROJ=$(echo $myline|cut -f2 -d:)
+                    PREV_VER=$(echo $myline|cut -f3 -d:)
                     if [ "$PROJECT" != "$PREV_PROJ" -o "$VERSION" != "$PREV_VER" ]
                     then
                         break
@@ -503,12 +516,12 @@ check_sigscan() {
                 fi
                 if [[ $myline == SIG:* ]]
                 then
-                    PREV_SIGSCAN_DATE="`echo $myline|cut -f2 -d:`"
+                    PREV_SIGSCAN_DATE=$(echo $myline|cut -f2 -d:)
                 fi
             done < "$PREVSCANFILE"
             if [ ! -z "$PREV_SIGSCAN_DATE" ]
             then
-                NOWDATE=`date '+%Y%m%d%H%M%S'`
+                NOWDATE=$(date '+%Y%m%d%H%M%S')
                 DIFF=$((NOWDATE-PREV_SIGSCAN_DATE))
                 if [ $DIFF -gt $DIFFTIME ]
                 then
@@ -535,12 +548,6 @@ proc_sigscan() {
             return -1
         fi
         echo "detect_rescan.sh: Uploading Signature scan ..."
-        echo curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H 'Content-Type: application/ld+json' \
-        -H 'cache-control: no-cache' \
-        --data-binary "@$sig"
-        
         curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
@@ -586,7 +593,7 @@ then
     upload_boms
 fi
 
-SIGDATE=`check_sigscan 86400 $SIGFOLDER`
+SIGDATE=$(check_sigscan 86400 $SIGFOLDER)
 PROCSIGSCAN=$?
 
 if [ $PROCSIGSCAN -eq 1 ]
@@ -597,7 +604,6 @@ then
         error "Unable to upload sig scan json"
     fi
 else
-    echo
     echo "detect_rescan.sh: NOT uploading sig scan as time since last scan not exceeded"
 fi
 
