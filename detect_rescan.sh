@@ -160,7 +160,7 @@ PROJECT=
 VERSION=
 SIGFOLDER=
 run_detect_offline() {
-    curl -s -L https://detect.synopsys.com/detect.sh > $DETECT
+    curl -s -L https://detect.synopsys.com/detect.sh > $DETECT 2>/dev/null
     if [ ! -r $DETECT ]
     then
         return -1
@@ -222,7 +222,7 @@ then
     error "No connection data for BD Server (BLACKDUCK_URL or BLACKDUCK_API_TOKEN)"
 fi
 
-curl -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
+curl -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
 TOKEN=$(cat $TEMPFILE | tr , '\n' | cut -f4 -d\")
 if [ -z "$TOKEN" ]
 then
@@ -300,11 +300,11 @@ upload_boms() {
     for index in ${UNMATCHED_BOMS[@]}
     do
         echo -n '.'
-        curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/vnd.blackducksoftware.bdio+json' \
         -H 'cache-control: no-cache' \
-        --data-binary "@$RUNDIR/bdio/${BOM_FILES[$index]}"
+        --data-binary "@$RUNDIR/bdio/${BOM_FILES[$index]}" >/dev/null 2>&1
         if [ $? -eq 0 ]
         then
             UPLOADED=$((UPLOADED+1))
@@ -348,11 +348,11 @@ api_call() {
         HEADER="$2"
     fi
     rm -f $TEMPFILE
-    curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" 2>/dev/null >$TEMPFILE
+    curl -s -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" 2>/dev/null >$TEMPFILE
     if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
     then
         ( echo API Error:
-        echo  curl -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
+        echo  curl -s -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
         return -1
     fi
     COUNT=$(cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:)
@@ -567,11 +567,11 @@ proc_sigscan() {
             return -1
         fi
         echo "detect_rescan.sh: Uploading Signature scan ..."
-        curl -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
         -H 'cache-control: no-cache' \
-        --data-binary "@$sig"
+        --data-binary "@$sig" >/dev/null 2>&1
         return $?
     done
     return -1
@@ -653,6 +653,10 @@ run_report() {
     echo "Licenses,,-,$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)"
     echo "Op Risk,,,-,$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)"
     echo ) | sed -e 's/,/	/g' >>$REPFILE
+    
+   (
+   echo "See Black Duck Project at:"
+   echo "$VERURL/components" ) >>$REPFILE
 }
 
 run_detect_offline
