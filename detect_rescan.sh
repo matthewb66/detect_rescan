@@ -607,6 +607,7 @@ else
     echo "detect_rescan.sh: NOT uploading sig scan as time since last scan not exceeded"
 fi
 
+RETURN=0
 if [ $DETECT_ACTION -eq 1 ]
 then
     VERURL=$(get_projver "$PROJECT" "$VERSION")
@@ -625,11 +626,12 @@ then
     then
         error "wait_for_bom_completion() returned error"
     fi
-    run_detect_action 
+    run_detect_action
+    RETURN=$?
 fi
 
 write_prevscanfile $SIGDATE
 
 cleanup
 echo "detect_rescan.sh: Done"
-end 0
+end $RETURN
