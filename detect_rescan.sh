@@ -11,19 +11,24 @@
 # 6. Upload only modified dependency scans
 #
 # Arguments:
+#   --quiet - Quite mode - hide detect and other outputs
+#   --report - Report vulnerability, license and policy counts
 #   Same as detect.sh
 #
 
 DETECT=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
+LOGFILE=$(mktemp -u)
+REPFILE=(mktemp -u)
 
 error () {
-    echo "ERROR: detect_rescan.sh: $*" >&2
+    echo "ERROR: detect_rescan.sh: $*" >$LOGFILE
+    cat $LOGFILE
     end 1
 }
 
 end () {
-    rm -f $TEMPFILE $DETECT
+    rm -f $TEMPFILE $DETECT $REPFILE $LOGFILE
     exit $1
 }
 
@@ -56,7 +61,8 @@ SCANLOC=.
 DETECT_ACTION=0
 DETECT_PROJECT=0
 DETECT_VERSION=0
-
+MODE_QUIET=0
+MODE_REPORT=0
 echo "detect_rescan.sh: Starting detect wrapper v1.0"
 
 process_args() {
@@ -66,28 +72,22 @@ process_args() {
         if [[ $arg == --blackduck.offline.mode=* ]]
         then
             continue
-        fi
-        if [[ $arg == --detect.blackduck.signature.scanner.host.url=* ]]
+        elif [[ $arg == --detect.blackduck.signature.scanner.host.url=* ]]
         then
             continue
-        fi
-        if [[ $arg == --blackduck.api.token=* ]]
+        elif [[ $arg == --blackduck.api.token=* ]]
         then
             API_TOKEN=$(echo $arg | cut -f2 -d=)==
-        fi
-        if [[ $arg == --blackduck.url=* ]]
+        elif [[ $arg == --blackduck.url=* ]]
         then
             BD_URL=$(echo $arg | cut -f2 -d=)
-        fi
-        if [[ $arg == --detect.project.name=* ]]
+        elif [[ $arg == --detect.project.name=* ]]
         then
             DETECT_PROJECT=1
-        fi
-        if [[ $arg == --detect.project.version.name=* ]]
+        elif [[ $arg == --detect.project.version.name=* ]]
         then
             DETECT_VERSION=1
-        fi
-        if [[ $arg == --spring.profiles.active=* ]]
+        elif [[ $arg == --spring.profiles.active=* ]]
         then
             YML="application-`echo $arg | cut -f2 -d=`.yml"
             if [ ! -r $YML ]
@@ -103,7 +103,13 @@ process_args() {
                 echo "detect_rescan.sh: Detect Action identified - will rerun Detect after upload and scan completion"
             fi
         done
-        if [[ $arg == --* ]]
+        if [ "$arg" == "--report" ]
+        then
+            MODE_REPORT=1
+        elif [ "$arg" == "--quiet" ]
+        then
+            MODE_QUIET=1
+        elif [[ $arg == --* ]]
         then
             if [ ! -z "$prevarg" ]
             then
@@ -154,7 +160,6 @@ PROJECT=
 VERSION=
 SIGFOLDER=
 run_detect_offline() {
-    echo
     curl -s -L https://detect.synopsys.com/detect.sh > $DETECT
     if [ ! -r $DETECT ]
     then
@@ -162,8 +167,16 @@ run_detect_offline() {
     fi
     chmod +x $DETECT
 
-    $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true | tee $TEMPFILE
-    RET=${PIPESTATUS[0]}
+    if [ $MODE_QUIET -eq 0 ]
+    then
+        $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true | tee $TEMPFILE
+        RET=${PIPESTATUS[0]}
+    else
+        echo "detect_rescan.sh: Running Detect offline ..."
+        $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true >$TEMPFILE
+        RET=$?
+        cat $TEMPFILE >>$LOGFILE
+    fi
     if [ $RET -ne 0 ]
     then
         return $RET
@@ -300,11 +313,11 @@ upload_boms() {
         fi
     done
     echo
-    echo "detect_rescan.sh: $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
+    echo "detect_rescan.sh: - $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
 }
 
 run_detect_action() {
-    echo "detect_rescan.sh: Rerunning Detect to execute action or wait for project"
+    echo "detect_rescan.sh: Rerunning Detect to execute post-scan action"
     if [ $DETECT_PROJECT -eq 0 ]
     then
         ARGS="$ARGS '--detect.project.name=$PROJECT'"
@@ -313,8 +326,14 @@ run_detect_action() {
     then
         ARGS="$ARGS '--detect.project.version.name=$VERSION'"
     fi
-    $DETECT $ARGS --detect.tools=NONE
-    RET=${PIPESTATUS[0]}
+    if [ $MODE_QUIET -eq 0 ]
+    then
+        $DETECT $ARGS --detect.tools=NONE
+        RET=$?
+    else
+        $DETECT $ARGS --detect.tools=NONE >>$LOGFILE
+        RET=$?
+    fi
     if [ $RET -ne 0 ]
     then
         return $RET
@@ -564,19 +583,76 @@ cleanup() {
         if [ -d "$RUNDIR/bdio" ]
         then
             rm -rf "$RUNDIR/bdio"
-            echo "detect_rescan.sh: Deleting $RUNDIR/bdio"
+            #echo "detect_rescan.sh: Deleting $RUNDIR/bdio"
         fi
         if [ -d "$RUNDIR/extractions" ]
         then
             rm -rf "$RUNDIR/extractions"
-            echo "detect_rescan.sh: Deleting $RUNDIR/extractions"
+            #echo "detect_rescan.sh: Deleting $RUNDIR/extractions"
         fi
         if [ -d "$RUNDIR/scan" ]
         then
             rm -rf "$RUNDIR/scan"
-            echo "detect_rescan.sh: Deleting $RUNDIR/scan"
+            #echo "detect_rescan.sh: Deleting $RUNDIR/scan"
         fi
     fi
+}
+
+run_report() {
+    if [ -z "$VERURL" ]
+    then
+        VERURL=$(get_projver "$PROJECT" "$VERSION")
+        if [ $? -lt 0 ]
+        then
+            error "Unable to locate project $PROJECT version $VERSION"
+        fi
+    fi
+
+    api_call ${VERURL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
+    if [ $? -le 0 ]
+    then
+        return -1
+    fi
+
+    (echo
+    echo BLACK DUCK OSS SUMMARY REPORT
+    echo
+    echo Component Policy Status:
+    POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE)
+    if [ "$POL_STATUS" == "IN_VIOLATION" ]
+    then
+        POL_TYPES=($(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE))
+        POL_STATS=($(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE))
+        for ind in ${!POL_TYPES[@]}
+        do
+            if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+            then
+                echo "- In Violation Overidden:	${POL_STATS[$ind]}"
+            elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+            then
+                echo "- Not In Violation:		${POL_STATS[$ind]}"
+            elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
+            then
+                echo "- In Violation:			${POL_STATS[$ind]}"
+            fi
+        done
+    else
+        echo "No violations"
+    fi ) > $REPFILE
+    
+    api_call ${VERURL}/risk-profile
+    if [ $? -le 0 ]
+    then
+        return -1
+    fi
+
+    ( echo
+    echo "Component Risk:"
+    echo "			CRIT	HIGH	MED 	LOW 	None"
+    echo "Vulnerabilities,,$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)"
+    echo "Licenses,,-,$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)"
+    echo "Op Risk,,,-,$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)"
+    echo ) | sed -e 's/,/	/g' >>$REPFILE
 }
 
 run_detect_offline
@@ -608,6 +684,7 @@ else
 fi
 
 RETURN=0
+VERURL=
 if [ $DETECT_ACTION -eq 1 ]
 then
     VERURL=$(get_projver "$PROJECT" "$VERSION")
@@ -632,6 +709,14 @@ fi
 
 write_prevscanfile $SIGDATE
 
+if [ $MODE_REPORT -eq 1 ]
+then
+    run_report
+fi
 cleanup
 echo "detect_rescan.sh: Done"
+if [ -r $REPFILE ]
+then
+    cat $REPFILE
+fi
 end $RETURN
