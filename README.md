@@ -82,3 +82,5 @@ The example output of the `--report` option is shown below:
 The `detect_rescan.sh` script should be used in place of Synopsys Detect at the same integration points where a direct call is made to the detect.sh script.
 
 It is not suitable for use with CI/CD plugins and other integrations which do not use the detect.sh script or the Detect jar directly.
+
+Currently the script operates under Linux/MacOS via bash, but does not operate correctly using the Bash task in Azure DevOps on Windows currently.
