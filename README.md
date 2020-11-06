@@ -51,6 +51,7 @@ where DETECT_OPTIONS are the standard Synopsys Detect options.
 Alternatively the script can be downloaded and saved locally using:
 
     curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh > detect_rescan.sh
+    chmod +x detect_rescan.sh
 
 # USAGE
 
