@@ -69,7 +69,7 @@ The example output of the `--report` option is shown below:
     - In Violation:			1
 
     Component Risk:
-          CRIT	HIGH	MED 	LOW 	None
+          			CRIT	HIGH	MED 	LOW 	None
     Vulnerabilities		0	0	0	0	98
     Licenses		-	0	63	0	35
     Op Risk			-	10	39	12	37
@@ -81,6 +81,6 @@ The example output of the `--report` option is shown below:
 
 The `detect_rescan.sh` script should be used in place of Synopsys Detect at the same integration points where a direct call is made to the detect.sh script.
 
-It is not suitable for use with CI/CD plugins and other integrations which do not use the detect.sh script or the Detect jar directly.
+It is not suitable for use with CI/CD plugins and other integrations which do not use the detect.sh script or which call the Detect jar directly.
 
-Currently the script operates under Linux/MacOS via bash, but does not operate correctly using the Bash task in Azure DevOps on Windows currently.
+Currently the script operates under Linux/MacOS via bash, but does not function correctly using the Bash task in Azure DevOps on Windows.
