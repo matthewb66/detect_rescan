@@ -19,7 +19,6 @@
 DETECT=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 LOGFILE=$(mktemp -u)
-REPFILE=(mktemp -u)
 
 error () {
     echo "ERROR: detect_rescan.sh: $*" >$LOGFILE
@@ -28,7 +27,7 @@ error () {
 }
 
 end () {
-    rm -f $TEMPFILE $DETECT $REPFILE $LOGFILE
+    rm -f $TEMPFILE $DETECT $LOGFILE
     exit $1
 }
 
@@ -202,11 +201,21 @@ run_detect_offline() {
 
 BOM_FILES=()
 BOM_HASHES=()
+
 proc_bom_files() {
-    for bom in $RUNDIR/bdio/*.jsonld
+    PWD=$(pwd)
+    cd "$RUNDIR"
+    if [ ! -d bdio ]
+    then
+        cd $PWD
+        return -1
+    fi
+    cd bdio
+    for bom in *.jsonld
     do
         if [ ! -r "$bom" ]
         then
+            cd $PWD
             return -1
         fi
         CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
@@ -214,6 +223,7 @@ proc_bom_files() {
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
     done
+    cd $PWD
     return 0
 }
 
@@ -294,7 +304,7 @@ write_prevscanfile() {
 }
 
 upload_boms() {
-    echo -n "detect_rescan.sh: Uploading ${#UNMATCHED_BOMS[@]} out of ${#BOM_FILES[@]} total BOM files ..."
+    echo -n "detect_rescan.sh: BOM files - Uploading ${#UNMATCHED_BOMS[@]} out of ${#BOM_FILES[@]} total ..."
     UPLOADED=0
     FAILED=0
     for index in ${UNMATCHED_BOMS[@]}
@@ -313,7 +323,12 @@ upload_boms() {
         fi
     done
     echo
-    echo "detect_rescan.sh: - $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
+    #echo "detect_rescan.sh: - $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
+    if [ $FAILED -gt 0 ]
+    then
+        return -1
+    fi
+    return 0
 }
 
 run_detect_action() {
@@ -334,10 +349,7 @@ run_detect_action() {
         $DETECT $ARGS --detect.tools=NONE >>$LOGFILE
         RET=$?
     fi
-    if [ $RET -ne 0 ]
-    then
-        return $RET
-    fi
+    return $RET
 }
 
 api_call() {
@@ -352,7 +364,7 @@ api_call() {
     if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
     then
         ( echo API Error:
-        echo  curl -s -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" ) >&2
+        echo  curl -s -X GET --header "Accept:$HEADER" "$1" ) >&2
         return -1
     fi
     COUNT=$(cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:)
@@ -395,32 +407,32 @@ get_project() {
         return -1
     fi
 
-    echo "detect_rescan.sh: Project '$PROJ' found ..." >&2
+#     echo "detect_rescan.sh: Project '$PROJ' found ..." >&2
     echo $PROJURL
     return 0
 }
 
 get_version() {
     # Get Version
-    api_call "${1//[\"]}/versions" 'application/vnd.blackducksoftware.project-detail-4+json'
+    API_URL="${1//[\"]}/versions?versionName%3A$2"
+    api_call "${API_URL// /%20}" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -le 0 ]
     then
         return -1
     fi
-    
     SEARCHVERSION="${2// /_}"
     VERNAMES=($(jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
     VERURLS=$(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE)
     VERNUM=0
-    local FOUNDVERSIONURL=
-    for VERURL in $VERURLS
+    FOUNDVERSIONURL=
+    for URL in $VERURLS
     do
         VERNAME=${VERNAMES[$VERNUM]}
     
         if [ "$VERNAME" == "$SEARCHVERSION" ]
         then
-            FOUNDVERSIONURL=$VERURL
-            break 2
+            FOUNDVERSIONURL=$URL
+            break
         fi
         ((VERNUM++))
     done
@@ -430,7 +442,7 @@ get_version() {
         return -1
     fi
 
-    echo "detect_rescan.sh: Version '$VERSION' found ..." >&2
+#     echo "detect_rescan.sh: Version '$VERSION' found ..." >&2
     echo $FOUNDVERSIONURL
     return 0
 }
@@ -442,13 +454,13 @@ get_projver() {
         return -1
     fi
         
-    VERURL=$(get_version "$PROJURL" "$2")
+    URL=$(get_version "$PROJURL" "$2")
     if [ $? -ne 0 ]
     then
         return -1
     fi
-    
-    echo $VERURL
+  
+    echo $URL
     return 0
 }
 
@@ -560,20 +572,32 @@ check_sigscan() {
 }
 
 proc_sigscan() {
-    for sig in $SIGFOLDER/data/*.json
+    PWD=$(pwd)
+    cd $SIGFOLDER
+    if [ ! -d data ]
+    then
+        cd $PWD
+        return -1
+    fi
+    cd data
+    for sig in *.json
     do
         if [ ! -r "$sig" ]
         then
+            cd $PWD
             return -1
         fi
-        echo "detect_rescan.sh: Uploading Signature scan ..."
+        echo "detect_rescan.sh: Signature Scan - Uploading ..."
         curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
         -H 'cache-control: no-cache' \
         --data-binary "@$sig" >/dev/null 2>&1
-        return $?
+        RET=$?
+        cd $PWD
+        return $RET
     done
+    cd $PWD
     return -1
 }
 
@@ -599,23 +623,22 @@ cleanup() {
 }
 
 run_report() {
-    if [ -z "$VERURL" ]
+    URL=$1
+    if [ -z "$URL" ]
     then
-        VERURL=$(get_projver "$PROJECT" "$VERSION")
-        if [ $? -lt 0 ]
-        then
-            error "Unable to locate project $PROJECT version $VERSION"
-        fi
+        return -1
     fi
 
-    api_call ${VERURL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
+    api_call ${URL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
     if [ $? -le 0 ]
     then
         return -1
     fi
 
-    (echo
+    echo
+    echo "----------------------------------------------------------------------"
     echo BLACK DUCK OSS SUMMARY REPORT
+    echo "Project: '$PROJECT' Version: '$VERSION'"
     echo
     echo Component Policy Status:
     POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE)
@@ -627,36 +650,37 @@ run_report() {
         do
             if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
             then
-                echo "- In Violation Overidden:	${POL_STATS[$ind]}"
+                echo "	- In Violation Overidden:	${POL_STATS[$ind]}"
             elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
             then
-                echo "- Not In Violation:		${POL_STATS[$ind]}"
+                echo "	- Not In Violation:		${POL_STATS[$ind]}"
             elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
             then
-                echo "- In Violation:			${POL_STATS[$ind]}"
+                echo "	- In Violation:			${POL_STATS[$ind]}"
             fi
         done
     else
         echo "No violations"
-    fi ) > $REPFILE
+    fi
     
-    api_call ${VERURL}/risk-profile
+    api_call ${URL}/risk-profile
     if [ $? -le 0 ]
     then
         return -1
     fi
 
-    ( echo
-    echo "Component Risk:"
-    echo "			CRIT	HIGH	MED 	LOW 	None"
-    echo "Vulnerabilities,,$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)"
-    echo "Licenses,,-,$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)"
-    echo "Op Risk,,,-,$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)"
-    echo ) | sed -e 's/,/	/g' >>$REPFILE
+    (echo
+    echo "Component Risk:			CRIT	HIGH	MED 	LOW 	None"
+    echo "				----	----	--- 	--- 	----"
+    echo "	Vulnerabilities,,$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)"
+    echo "	Licenses,,-,$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)"
+    echo "	Op Risk,,,-,$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)"
+    echo ) | sed -e 's/,/	/g' 
     
-   (
-   echo "See Black Duck Project at:"
-   echo "$VERURL/components" ) >>$REPFILE
+    echo "See Black Duck Project at:"
+    echo "$URL/components"
+    echo 
+    echo "----------------------------------------------------------------------"
 }
 
 run_detect_offline
@@ -671,6 +695,10 @@ then
     get_prev_boms
     compare_boms
     upload_boms
+    if [ $? -ne 0 ]
+    then
+        error "Unable to upload BOM files"
+    fi
 fi
 
 SIGDATE=$(check_sigscan 86400 $SIGFOLDER)
@@ -684,18 +712,33 @@ then
         error "Unable to upload sig scan json"
     fi
 else
-    echo "detect_rescan.sh: NOT uploading sig scan as time since last scan not exceeded"
+    echo "detect_rescan.sh: Signature scan - NOT uploading as time since last scan not exceeded"
 fi
 
 RETURN=0
 VERURL=
-if [ $DETECT_ACTION -eq 1 ]
+if [ $DETECT_ACTION -eq 1 -o $MODE_REPORT -eq 1 ]
 then
-    VERURL=$(get_projver "$PROJECT" "$VERSION")
-    if [ $? -lt 0 ]
-    then
-        error "Unable to locate project $PROJECT version $VERSION"
-    fi
+    count=0
+    while true
+    do
+        VERURL=$(get_projver "$PROJECT" "$VERSION")
+        if [ $? -lt 0 ]
+        then
+            error "Unable to locate project $PROJECT version $VERSION"
+        fi
+        ((count++))
+        if [ $count -gt 12 ]
+        then
+            error "Unable to get Version URL for project"
+        fi
+        if [ ! -z "$VERURL" ]
+        then
+            break
+        fi
+        sleep 10
+    done
+
     echo -n "detect_rescan.sh: Waiting for BOM completion: ..."
     wait_for_scans $VERURL
     if [ $? -lt 0 ]
@@ -707,20 +750,24 @@ then
     then
         error "wait_for_bom_completion() returned error"
     fi
-    run_detect_action
-    RETURN=$?
+    if [ $DETECT_ACTION -eq 1 ]
+    then
+        run_detect_action
+        RETURN=$?
+        if [ $RETURN -ne 0 ]
+        then
+            echo "detect_rescan.sh: Detect returned code $RETURN"
+        fi
+    fi
 fi
 
 write_prevscanfile $SIGDATE
 
 if [ $MODE_REPORT -eq 1 ]
 then
-    run_report
+    run_report $VERURL
 fi
 cleanup
-echo "detect_rescan.sh: Done"
-if [ -r $REPFILE ]
-then
-    cat $REPFILE
-fi
+echo "detect_rescan.sh: Done (Return code $RETURN)"
+
 end $RETURN
