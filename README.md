@@ -55,7 +55,7 @@ Alternatively the script can be downloaded and saved locally using:
 
 # USAGE
 
-The script provides 2 options in addition to the standard Synopsys Detect options as follows:
+The script provides 3 options in addition to the standard Synopsys Detect arguments as follows:
 
     --quiet - Use to hide Synopsys Detect standard output and other script notifications
     --report - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
