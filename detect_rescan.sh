@@ -62,7 +62,8 @@ DETECT_PROJECT=0
 DETECT_VERSION=0
 MODE_QUIET=0
 MODE_REPORT=0
-echo "detect_rescan.sh: Starting detect wrapper v1.0"
+MARKDOWN=0
+echo "detect_rescan.sh: Starting detect wrapper v1.1"
 
 process_args() {
     prevarg=
@@ -108,6 +109,9 @@ process_args() {
         elif [ "$arg" == "--quiet" ]
         then
             MODE_QUIET=1
+        elif [ "$arg" == "--markdown" ]
+        then
+            MODE_MARKDOWN=1
         elif [[ $arg == --* ]]
         then
             if [ ! -z "$prevarg" ]
@@ -121,6 +125,7 @@ process_args() {
         if [[ $prevarg == --detect.source.path=* ]]
         then
             SCANLOC=$(echo $prevarg | cut -f2 -d=)
+            SCANLOC=$(cd $SCANLOC; pwd)
         fi
     done
     ARGS="$ARGS '$prevarg'"
@@ -239,7 +244,7 @@ then
     error "Cannot obtain auth token"
 fi
 
-PREVSCANFILE="$SCANLOC/.bdprevscan"
+PREVSCANFILE="$(echo ${SCANLOC}| sed -e 's/\/$//')/.bdprevscan"
 
 PREV_FILES=()
 PREV_HASHES=()
@@ -262,7 +267,7 @@ get_prev_boms() {
                 PREV_FILES+=($(echo $myline|cut -f2 -d:))
                 PREV_HASHES+=($(echo $myline|cut -f3 -d:))
             fi
-        done < "$PREVSCANFILE"
+        done <"$PREVSCANFILE"
     fi
 }
 
@@ -290,7 +295,10 @@ compare_boms() {
 
 write_prevscanfile() {
     SIGDATE=$1
-    rm -f "$PREVSCANFILE"
+    if [ -r "$PREVSCANFILE" ]
+    then
+        rm -f "$PREVSCANFILE"
+    fi
     ( echo "VER:$PROJECT:$VERSION"
     for index in ${!BOM_FILES[@]}
     do
@@ -299,8 +307,7 @@ write_prevscanfile() {
     if [ ! -z "$SIGDATE" ]
     then
         echo "SIG:$SIGDATE"
-    fi ) > "$PREVSCANFILE"
-    
+    fi ) >"$PREVSCANFILE"
 }
 
 upload_boms() {
@@ -634,33 +641,70 @@ run_report() {
     then
         return -1
     fi
+    
+    MARKDOWNFILE=$SCANLOC/blackduck.md
 
-    echo
-    echo "----------------------------------------------------------------------"
-    echo BLACK DUCK OSS SUMMARY REPORT
-    echo "Project: '$PROJECT' Version: '$VERSION'"
-    echo
-    echo Component Policy Status:
+    if [ $MODE_MARKDOWN -eq 1 ]
+    then
+        ( echo
+        echo "# BLACK DUCK OSS SUMMARY REPORT"
+        echo "Project: '$PROJECT' Version: '$VERSION'"
+        echo
+        echo "## Component Policy Status:" ) >$MARKDOWNFILE
+    fi
+    if [ $MODE_REPORT -eq 1 ]
+    then
+        echo
+        echo "----------------------------------------------------------------------"
+        echo BLACK DUCK OSS SUMMARY REPORT
+        echo "Project: '$PROJECT' Version: '$VERSION'"
+        echo
+    fi
     POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE)
     if [ "$POL_STATUS" == "IN_VIOLATION" ]
     then
         POL_TYPES=($(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE))
         POL_STATS=($(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE))
+        if [ $MODE_MARKDOWN -eq 1 ]
+        then
+            ( echo "| Component Policy Status | Count |"
+            echo "|-------------------------|-------:|" ) >>$MARKDOWNFILE
+        fi
+        if [ $MODE_REPORT -eq 1 ]
+        then
+            echo Component Policy Status:
+        fi
         for ind in ${!POL_TYPES[@]}
         do
-            if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+            if [ $MODE_MARKDOWN -eq 1 ]
             then
-                echo "	- In Violation Overidden:	${POL_STATS[$ind]}"
-            elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+                if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+                then
+                    echo "| In Violation Overidden | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
+                elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+                then
+                    echo "| Not In Violation | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
+                elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
+                then
+                    echo "| In Violation | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
+                fi
+            fi
+            if [ $MODE_REPORT -eq 1 ]
             then
-                echo "	- Not In Violation:		${POL_STATS[$ind]}"
-            elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
-            then
-                echo "	- In Violation:			${POL_STATS[$ind]}"
+                if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+                then
+                    echo "	- In Violation Overidden:	${POL_STATS[$ind]}"
+                elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+                then
+                    echo "	- Not In Violation:		${POL_STATS[$ind]}"
+                elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
+                then
+                    echo "	- In Violation:			${POL_STATS[$ind]}"
+                fi
             fi
         done
     else
-        echo "No violations"
+        echo "No policy violations"
     fi
     
     api_call ${URL}/risk-profile
@@ -669,24 +713,46 @@ run_report() {
         return -1
     fi
 
-    (echo
-    echo "Component Risk:			CRIT	HIGH	MED 	LOW 	None"
-    echo "				----	----	--- 	--- 	----"
-    echo "	Vulnerabilities,,$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)"
-    echo "	Licenses,,-,$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)"
-    echo "	Op Risk,,,-,$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)"
-    echo ) | sed -e 's/,/	/g' 
+    VULNS=$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)
+    LICS=$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)
+    OPS=$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)
+    if [ $MODE_MARKDOWN -eq 1 ]
+    then
+        ( echo
+        echo "## Component Risk"
+        echo "| CATEGORY | CRIT | HIGH | MED | LOW | None |"
+        echo "|----------|------:|-------:|------:|------:|-------:|"
+        echo "| Vulnerabilities | ${VULNS//,/ | } |"
+        echo "| Licenses | - | ${LICS//,/ | } |"
+        echo "| Op Risk | - | ${OPS//,/ | } |"
+        echo    
+        echo "See the scanned Black Duck Project [here]($URL/components)" )>>$MARKDOWNFILE
+    fi
+    if [ $MODE_REPORT -eq 1 ]
+    then
+        (echo
+        echo "Component Risk:			CRIT	HIGH	MED 	LOW 	None"
+        echo "				----	----	--- 	--- 	----"
+        echo "	Vulnerabilities,,${VULNS}"
+        echo "	Licenses,,-,${LICS}"
+        echo "	Op Risk,,,-,${OPS}"
+        echo ) | sed -e 's/,/	/g' 
     
-    echo "See Black Duck Project at:"
-    echo "$URL/components"
-    echo 
-    echo "----------------------------------------------------------------------"
+        echo "See Black Duck Project at:"
+        echo "$URL/components"
+        echo 
+        echo "----------------------------------------------------------------------"
+    fi
 }
 
 run_detect_offline
 if [ $? -ne 0 ]
 then
     error "Detect returned error code"
+fi
+if [ -z "$RUNDIR" -o ! -d "$RUNDIR" ]
+then
+    error "Unable to determine project folder from Detect run"
 fi
 
 proc_bom_files
@@ -717,11 +783,12 @@ fi
 
 RETURN=0
 VERURL=
-if [ $DETECT_ACTION -eq 1 -o $MODE_REPORT -eq 1 ]
+if [ $DETECT_ACTION -eq 1 -o $MODE_REPORT -eq 1 -o $MODE_MARKDOWN -eq 1 ]
 then
     count=0
     while true
     do
+        sleep 10
         VERURL=$(get_projver "$PROJECT" "$VERSION")
         if [ $? -lt 0 ]
         then
@@ -736,7 +803,6 @@ then
         then
             break
         fi
-        sleep 10
     done
 
     echo -n "detect_rescan.sh: Waiting for BOM completion: ..."
@@ -763,7 +829,7 @@ fi
 
 write_prevscanfile $SIGDATE
 
-if [ $MODE_REPORT -eq 1 ]
+if [ $MODE_REPORT -eq 1 -o $MODE_MARKDOWN -eq 1 ]
 then
     run_report $VERURL
 fi
