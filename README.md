@@ -59,6 +59,7 @@ The script provides 2 options in addition to the standard Synopsys Detect option
 
     --quiet - Use to hide Synopsys Detect standard output and other script notifications
     --report - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
+    --markdown - Write a project summary report to the blackduck.md file created in the project folder.
     
 The example output of the `--report` option is shown below:
 
