@@ -783,7 +783,7 @@ fi
 
 RETURN=0
 VERURL=
-if [ $DETECT_ACTION -eq 1 -o $MODE_REPORT -eq 1 -o $MODE_MARKDOWN -eq 1 ]
+if [ $DETECT_ACTION -eq 1 ] -o [ $MODE_REPORT -eq 1 ] -o [ $MODE_MARKDOWN -eq 1 ]
 then
     count=0
     while true
@@ -829,7 +829,7 @@ fi
 
 write_prevscanfile $SIGDATE
 
-if [ $MODE_REPORT -eq 1 -o $MODE_MARKDOWN -eq 1 ]
+if [ $MODE_REPORT -eq 1 ] -o [ $MODE_MARKDOWN -eq 1 ]
 then
     run_report $VERURL
 fi
