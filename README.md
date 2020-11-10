@@ -1,5 +1,5 @@
 # detect_rescan.sh 
-Bash script to wrapper Synopsys Detect for Black Duck scanning to reduce duplicate scan uploads between runs for use in frequent automated scan processes.
+Bash script to wrapper Synopsys Detect for Black Duck scanning to reduce duplicate scan uploads between runs for use in frequent automated scan processes and optionally produce immediate project security summary reports.
 
 # INTRODUCTION
 
@@ -19,9 +19,10 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 - Looks for previous scan record in .bdprevscan file in scanned project folder
 - Compares scanned BOM files and uploads if different/new to previous scan
 - Checks last date/time for signature scan and uploads if more than 24 hours or new scan
-- If post-action required:
+- If post-action or report required:
   - Waits for server-side scan and BOM completion
   - Runs Detect to perform post-action with no rescan
+- If --report or --markdown specified, produce summary reports (--markdown writes a file in MD format)
 
 # PREREQUISITES
 
