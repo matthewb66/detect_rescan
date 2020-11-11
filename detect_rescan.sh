@@ -208,11 +208,11 @@ BOM_FILES=()
 BOM_HASHES=()
 
 proc_bom_files() {
-    PWD=$(pwd)
+    CWD=$(pwd)
     cd "$RUNDIR"
     if [ ! -d bdio ]
     then
-        cd $PWD
+        cd $CWD
         return -1
     fi
     cd bdio
@@ -220,7 +220,7 @@ proc_bom_files() {
     do
         if [ ! -r "$bom" ]
         then
-            cd $PWD
+            cd $CWD
             return -1
         fi
         CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
@@ -228,7 +228,7 @@ proc_bom_files() {
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
     done
-    cd $PWD
+    cd $CWD
     return 0
 }
 
@@ -299,15 +299,15 @@ write_prevscanfile() {
     then
         rm -f "$PREVSCANFILE"
     fi
-    ( echo "VER:$PROJECT:$VERSION"
+    echo "VER:$PROJECT:$VERSION" >$PREVSCANFILE
     for index in ${!BOM_FILES[@]}
     do
-        echo "BOM:${BOM_FILES[$index]}:${BOM_HASHES[$index]}"
+        echo "BOM:${BOM_FILES[$index]}:${BOM_HASHES[$index]}" >>$PREVSCANFILE
     done
     if [ ! -z "$SIGDATE" ]
     then
-        echo "SIG:$SIGDATE"
-    fi ) >"$PREVSCANFILE"
+        echo "SIG:$SIGDATE" >>$PREVSCANFILE
+    fi
 }
 
 upload_boms() {
@@ -366,68 +366,74 @@ api_call() {
     else
         HEADER="$2"
     fi
-    rm -f $TEMPFILE
-    curl -s -X GET --header "Authorization: Bearer $TOKEN" --header "Accept:$HEADER" "$1" 2>/dev/null >$TEMPFILE
-    if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
-    then
-        ( echo API Error:
-        echo  curl -s -X GET --header "Accept:$HEADER" "$1" ) >&2
-        return -1
-    fi
-    COUNT=$(cat $TEMPFILE | tr , '\n' | grep 'totalCount' | cut -f2 -d:)
-    if [ -z "$COUNT" ]
-    then
-        return -1
-    fi
-    return $COUNT
+	rm -f $TEMPFILE
+	curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
+	if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
+	then
+		( echo API Error:
+		echo  curl -X GET --header "Authorization: Bearer $TOKEN" "$1" ) >&2
+		return -1
+	fi
+
+	if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
+	then 
+		COUNT=$(cat $TEMPFILE | jq -r '.totalCount')
+		if [ -z "$COUNT" ]
+		then
+			return -1
+		fi
+		return $COUNT
+	fi
+	
+	return 1
 }
 
 get_project() {
-    #Get  projects
-    SEARCHPROJ="${1// /+}"
-    api_call "$BD_URL/api/projects?q=name:$SEARCHPROJ" 'application/vnd.blackducksoftware.project-detail-4+json'
+    #Get  projects $1=projectname
+
+    SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
+    MYURL="$BD_URL/api/projects?q=name:$SEARCHPROJ"
+    api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -le 0 ]
     then
         return -1
     fi
 
-    FOUND=false
-    SEARCHPROJ="${1// /_}"
-    PROJNAMES=$(jq -r '[.items[].name]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g')
-    PROJURLS=($(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
+    PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE | sed -e 's/ /+/g' -e 's/\"//g' -e 's:/:%2F:g' )
+    PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE | sed -e 's/ /+/g' -e 's/\"//g')
+
     PROJURL=
-    PROJNUM=0
-    for PROJ in $PROJNAMES
+    PROJNUM=1
+    FOUNDNUM=0
+    IFS=,; for PROJ in $PROJNAMES
     do
-#       echo DEBUG: PROJ=$PROJ SEARCHPROJ=$SEARCHPROJ >&2
         if [ "$PROJ" == "$SEARCHPROJ" ]
         then
-            FOUND=true
-            PROJURL="${PROJURLS[$PROJNUM]}"
+            FOUNDNUM=$PROJNUM
             break
         fi
         ((PROJNUM++))
     done
+    IFS=
 
-    if [ $FOUND == false ]
+    if [ $FOUNDNUM -eq 0 ]
     then
         return -1
     fi
 
-#     echo "detect_rescan.sh: Project '$PROJ' found ..." >&2
-    echo $PROJURL
+    echo $PROJURLS | cut -f $FOUNDNUM -d ,
     return 0
 }
 
 get_version() {
     # Get Version
     API_URL="${1//[\"]}/versions?versionName%3A$2"
+    SEARCHVERSION="${2// /_}"
     api_call "${API_URL// /%20}" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -le 0 ]
     then
         return -1
     fi
-    SEARCHVERSION="${2// /_}"
     VERNAMES=($(jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
     VERURLS=$(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE)
     VERNUM=0
@@ -449,25 +455,27 @@ get_version() {
         return -1
     fi
 
-#     echo "detect_rescan.sh: Version '$VERSION' found ..." >&2
     echo $FOUNDVERSIONURL
     return 0
 }
 
 get_projver() {
-    PROJURL=$(get_project "$1")
-    if [ $? -lt 0 ]
+# $1=projectname $2=versionname
+    PURL=$(get_project "$1")
+    if [ $? -lt 0 ] || [ -z "$PURL" ]
     then
         return -1
     fi
+
         
-    URL=$(get_version "$PROJURL" "$2")
-    if [ $? -ne 0 ]
+    VURL=$(get_version "$PURL" "$2")
+    if [ $? -ne 0 ] || [ -z "$VURL" ]
     then
         return -1
     fi
   
-    echo $URL
+
+    echo $VURL
     return 0
 }
 
@@ -579,11 +587,11 @@ check_sigscan() {
 }
 
 proc_sigscan() {
-    PWD=$(pwd)
+    CWD=$(pwd)
     cd $SIGFOLDER
     if [ ! -d data ]
     then
-        cd $PWD
+        cd $CWD
         return -1
     fi
     cd data
@@ -591,7 +599,7 @@ proc_sigscan() {
     do
         if [ ! -r "$sig" ]
         then
-            cd $PWD
+            cd $CWD
             return -1
         fi
         echo "detect_rescan.sh: Signature Scan - Uploading ..."
@@ -601,10 +609,10 @@ proc_sigscan() {
         -H 'cache-control: no-cache' \
         --data-binary "@$sig" >/dev/null 2>&1
         RET=$?
-        cd $PWD
+        cd $CWD
         return $RET
     done
-    cd $PWD
+    cd $CWD
     return -1
 }
 
