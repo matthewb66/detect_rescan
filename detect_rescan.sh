@@ -62,7 +62,7 @@ DETECT_PROJECT=0
 DETECT_VERSION=0
 MODE_QUIET=0
 MODE_REPORT=0
-MARKDOWN=0
+MODE_MARKDOWN=0
 echo "detect_rescan.sh: Starting detect wrapper v1.1"
 
 process_args() {
@@ -144,7 +144,7 @@ process_args() {
     fi
     if [ -z "$BD_URL" -o -z "$API_TOKEN" ]
     then
-        return -1
+        return 1
     fi
     return 0
 }
@@ -167,7 +167,7 @@ run_detect_offline() {
     curl -s -L https://detect.synopsys.com/detect.sh > $DETECT 2>/dev/null
     if [ ! -r $DETECT ]
     then
-        return -1
+        return 1
     fi
     chmod +x $DETECT
 
@@ -187,14 +187,14 @@ run_detect_offline() {
     fi
     if [ ! -r $TEMPFILE ]
     then
-        return -1
+        return 1
     fi
     RUNDIR=$(grep 'Run directory: ' $TEMPFILE | sed -e 's/^.*Run directory: //g')
     PROJECT=$(grep 'Project name: ' $TEMPFILE | sed -e 's/^.*Project name: //g')
     VERSION=$(grep 'Project version: ' $TEMPFILE | sed -e 's/^.*Project version: //g')
     if [ -z "$RUNDIR" -o ! -d "$RUNDIR" -o ! -d "$RUNDIR/bdio" -o -z "$PROJECT" -o -z "$VERSION" ]
     then
-        return -1
+        return 1
     fi
     SIGRUN=$(grep -c 'Starting the Black Duck Signature Scan' $TEMPFILE)
     if [ $SIGRUN -gt 0 ]
@@ -213,7 +213,7 @@ proc_bom_files() {
     if [ ! -d bdio ]
     then
         cd $CWD
-        return -1
+        return 1
     fi
     cd bdio
     for bom in *.jsonld
@@ -221,7 +221,7 @@ proc_bom_files() {
         if [ ! -r "$bom" ]
         then
             cd $CWD
-            return -1
+            return 1
         fi
         CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
         FILE=$(basename $bom)
@@ -333,7 +333,7 @@ upload_boms() {
     #echo "detect_rescan.sh: - $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
     if [ $FAILED -gt 0 ]
     then
-        return -1
+        return 1
     fi
     return 0
 }
@@ -360,43 +360,41 @@ run_detect_action() {
 }
 
 api_call() {
-#Returns the number of returned items
     if [ -z "$2" ]
     then
         HEADER="application/json"
     else
         HEADER="$2"
     fi
-	rm -f $TEMPFILE
-	curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
-	RET=$?
-	if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
-	then
-		echo "API Error: Curl returned $RET" >&2
-		return 0
-	fi
+    rm -f $TEMPFILE
+    curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
+    RET=$?
+    if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
+    then
+        echo "API Error: Curl returned $RET" >&2
+        return 1
+    fi
 
-	if [ $(grep -c 'failed authorization' $TEMPFILE) -gt 0 ]
-	then 
-		echo "Server or Project Authorization issue" >&2
-		return 0
-	fi
-	if [ $(grep -c errorCode $TEMPFILE) -gt 0 ]
-	then 
-		echo "Unknown API error" >&2
-		return 0
-	fi
-	if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
-	then 
-		COUNT=$(cat $TEMPFILE | jq -r '.totalCount' 2>/dev/null)
-		if [ -z "$COUNT" ]
-		then
-			return 0
-		fi
-		return $COUNT
-	fi
-	
-	return 1
+    if [ $(grep -c 'failed authorization' $TEMPFILE) -gt 0 ]
+    then 
+        echo "Server or Project Authorization issue" >&2
+        return 1
+    fi
+    if [ $(grep -c errorCode $TEMPFILE) -gt 0 ]
+    then 
+        echo "Unknown API error" >&2
+        return 1
+    fi
+    if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
+    then 
+        COUNT=$(cat $TEMPFILE | jq -r '.totalCount' 2>/dev/null)
+        if [ -z "$COUNT" ]
+        then
+            return 1
+        fi
+    fi
+    
+    return 0
 }
 
 get_project() {
@@ -405,9 +403,9 @@ get_project() {
     SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
     MYURL="$BD_URL/api/projects?q=name:$SEARCHPROJ"
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
-    if [ $? -eq 0 ]
+    if [ $? -ne 0 ]
     then
-        return -1
+        return 1
     fi
 
     PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /+/g' -e 's/\"//g' -e 's:/:%2F:g')
@@ -429,7 +427,7 @@ get_project() {
 
     if [ $FOUNDNUM -eq 0 ]
     then
-        return -1
+        return 1
     fi
 
     echo $PROJURLS | cut -f $FOUNDNUM -d ,
@@ -442,9 +440,9 @@ get_version() {
     API_URL="${1}/versions?versionName%3A${VERNAME}"
     SEARCHVERSION="${2}"
     api_call "${API_URL}" 'application/vnd.blackducksoftware.project-detail-4+json'
-    if [ $RET -eq 0 ]
+    if [ $RET -ne 0 ]
     then
-        return -1
+        return 1
     fi
 
     VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /_/g' -e 's/\"//g')
@@ -464,7 +462,7 @@ get_version() {
 
     if [ $FOUNDVERNUM -eq 0 ]
     then
-        return -1
+        return 1
     fi
 
     echo $VERURLS | cut -f $FOUNDVERNUM -d ,
@@ -492,9 +490,9 @@ get_projver() {
 wait_for_bom_completion() {
     # Check job status
     api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
-    if [ $? -eq 0 ]
+    if [ $? -ne 0 ]
     then
-        return -1
+        return 1
     fi
     STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
 
@@ -508,9 +506,9 @@ wait_for_bom_completion() {
         fi
         sleep 15
         api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
-        if [ $? -eq 0 ]
+        if [ $? -ne 0 ]
         then
-            return -1
+            return 1
         fi
         STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
         ((loop++))
@@ -527,9 +525,9 @@ wait_for_scans() {
         # Check scan status
         COMPLETE=1
         api_call "${1//[\"]}/codelocations" 'application/vnd.blackducksoftware.internal-1+json'
-        if [ $? -eq 0 ]
+        if [ $? -ne 0 ]
         then
-            return -1
+            return 1
         fi
         STATUSES=($(jq -r '[.items[].status[].status]' 2>/dev/null))
         index=0
@@ -602,7 +600,7 @@ proc_sigscan() {
     if [ ! -d data ]
     then
         cd $CWD
-        return -1
+        return 1
     fi
     cd data
     for sig in *.json
@@ -610,7 +608,7 @@ proc_sigscan() {
         if [ ! -r "$sig" ]
         then
             cd $CWD
-            return -1
+            return 1
         fi
         echo "detect_rescan.sh: Signature Scan - Uploading ..."
         curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
@@ -623,7 +621,7 @@ proc_sigscan() {
         return $RET
     done
     cd $CWD
-    return -1
+    return 1
 }
 
 cleanup() {
@@ -651,17 +649,17 @@ run_report() {
     URL=$1
     if [ -z "$URL" ]
     then
-        return -1
+        return 1
     fi
 
     api_call ${URL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
-    if [ $? -eq 0 ]
+    if [ $? -ne 0 ]
     then
-        return -1
+        return 1
     fi
     
     MARKDOWNFILE=$SCANLOC/blackduck.md
-
+echo $MODE_MARKDOWN
     if [ $MODE_MARKDOWN -eq 1 ]
     then
         ( echo
@@ -726,9 +724,9 @@ run_report() {
     fi
     
     api_call ${URL}/risk-profile
-    if [ $? -eq 0 ]
+    if [ $? -ne 0 ]
     then
-        return -1
+        return 1
     fi
 
     VULNS=$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE 2>/dev/null)
