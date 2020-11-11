@@ -360,6 +360,7 @@ run_detect_action() {
 }
 
 api_call() {
+#Returns the number of returned items
     if [ -z "$2" ]
     then
         HEADER="application/json"
@@ -368,19 +369,29 @@ api_call() {
     fi
 	rm -f $TEMPFILE
 	curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
-	if [ $? -ne 0 ] || [ ! -r $TEMPFILE ]
+	RET=$?
+	if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
 	then
-		( echo API Error:
-		echo  curl -X GET --header "Authorization: Bearer $TOKEN" "$1" ) >&2
-		return -1
+		echo "API Error: Curl returned $RET" >&2
+		return 0
 	fi
 
+	if [ $(grep -c 'failed authorization' $TEMPFILE) -gt 0 ]
+	then 
+		echo "Server or Project Authorization issue" >&2
+		return 0
+	fi
+	if [ $(grep -c errorCode $TEMPFILE) -gt 0 ]
+	then 
+		echo "Unknown API error" >&2
+		return 0
+	fi
 	if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
 	then 
-		COUNT=$(cat $TEMPFILE | jq -r '.totalCount')
+		COUNT=$(cat $TEMPFILE | jq -r '.totalCount' 2>/dev/null)
 		if [ -z "$COUNT" ]
 		then
-			return -1
+			return 0
 		fi
 		return $COUNT
 	fi
@@ -394,13 +405,13 @@ get_project() {
     SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
     MYURL="$BD_URL/api/projects?q=name:$SEARCHPROJ"
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
-    if [ $? -le 0 ]
+    if [ $? -eq 0 ]
     then
         return -1
     fi
 
-    PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE | sed -e 's/ /+/g' -e 's/\"//g' -e 's:/:%2F:g' )
-    PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE | sed -e 's/ /+/g' -e 's/\"//g')
+    PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /+/g' -e 's/\"//g' -e 's:/:%2F:g')
+    PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /+/g' -e 's/\"//g')
 
     PROJURL=
     PROJNUM=1
@@ -427,53 +438,52 @@ get_project() {
 
 get_version() {
     # Get Version
-    API_URL="${1//[\"]}/versions?versionName%3A$2"
-    SEARCHVERSION="${2// /_}"
-    api_call "${API_URL// /%20}" 'application/vnd.blackducksoftware.project-detail-4+json'
-    if [ $? -le 0 ]
+    VERNAME=$(echo $2 | sed -e 's/ /%20/g' -e 's:/:%2F:g')
+    API_URL="${1}/versions?versionName%3A${VERNAME}"
+    SEARCHVERSION="${2}"
+    api_call "${API_URL}" 'application/vnd.blackducksoftware.project-detail-4+json'
+    if [ $RET -eq 0 ]
     then
         return -1
     fi
-    VERNAMES=($(jq -r '[.items[].versionName]|@tsv' $TEMPFILE | sed -e 's/ /_/g' -e 's/\"//g' -e 's/,//g'))
-    VERURLS=$(jq -r '[.items[]._meta.href]|@tsv' $TEMPFILE)
-    VERNUM=0
-    FOUNDVERSIONURL=
-    for URL in $VERURLS
+
+    VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /_/g' -e 's/\"//g')
+    VERURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g')
+    VERNUM=1
+    FOUNDVERNUM=0
+    IFS=,; for NAME in $VERNAMES
     do
-        VERNAME=${VERNAMES[$VERNUM]}
-    
-        if [ "$VERNAME" == "$SEARCHVERSION" ]
+        if [ "$NAME" == "$SEARCHVERSION" ]
         then
-            FOUNDVERSIONURL=$URL
+            FOUNDVERNUM=$VERNUM
             break
         fi
         ((VERNUM++))
     done
+    IFS=
 
-    if [ -z "$FOUNDVERSIONURL" ]
+    if [ $FOUNDVERNUM -eq 0 ]
     then
         return -1
     fi
 
-    echo $FOUNDVERSIONURL
+    echo $VERURLS | cut -f $FOUNDVERNUM -d ,
     return 0
 }
 
 get_projver() {
 # $1=projectname $2=versionname
     PURL=$(get_project "$1")
-    if [ $? -lt 0 ] || [ -z "$PURL" ]
+    if [ $? -ne 0 ] || [ -z "$PURL" ]
     then
-        return -1
+        return 1
     fi
 
-        
     VURL=$(get_version "$PURL" "$2")
     if [ $? -ne 0 ] || [ -z "$VURL" ]
     then
-        return -1
+        return 1
     fi
-  
 
     echo $VURL
     return 0
@@ -482,11 +492,11 @@ get_projver() {
 wait_for_bom_completion() {
     # Check job status
     api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
-    if [ $? -le 0 ]
+    if [ $? -eq 0 ]
     then
         return -1
     fi
-    STATUS=$(jq -r '.upToDate' $TEMPFILE)
+    STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
 
     loop=0
     while [ $loop -lt 80 ]
@@ -498,11 +508,11 @@ wait_for_bom_completion() {
         fi
         sleep 15
         api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
-        if [ $? -le 0 ]
+        if [ $? -eq 0 ]
         then
             return -1
         fi
-        STATUS=$(jq -r '.upToDate' $TEMPFILE)
+        STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
         ((loop++))
     done
     echo
@@ -517,13 +527,13 @@ wait_for_scans() {
         # Check scan status
         COMPLETE=1
         api_call "${1//[\"]}/codelocations" 'application/vnd.blackducksoftware.internal-1+json'
-        if [ $? -le 0 ]
+        if [ $? -eq 0 ]
         then
             return -1
         fi
-        STATUSES=($(jq -r '[.items[].status[].status]' ))
+        STATUSES=($(jq -r '[.items[].status[].status]' 2>/dev/null))
         index=0
-        for stat in $(jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE)
+        for stat in $(jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE 2>/dev/null)
         do
             if [ $stat == 'ServerScanning' -a "${STATUSES[$index]}" != 'COMPLETED' ]
             then
@@ -645,7 +655,7 @@ run_report() {
     fi
 
     api_call ${URL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
-    if [ $? -le 0 ]
+    if [ $? -eq 0 ]
     then
         return -1
     fi
@@ -668,11 +678,11 @@ run_report() {
         echo "Project: '$PROJECT' Version: '$VERSION'"
         echo
     fi
-    POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE)
+    POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE 2>/dev/null)
     if [ "$POL_STATUS" == "IN_VIOLATION" ]
     then
-        POL_TYPES=($(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE))
-        POL_STATS=($(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE))
+        POL_TYPES=($(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE 2>/dev/null))
+        POL_STATS=($(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE 2>/dev/null))
         if [ $MODE_MARKDOWN -eq 1 ]
         then
             ( echo "| Component Policy Status | Count |"
@@ -716,14 +726,14 @@ run_report() {
     fi
     
     api_call ${URL}/risk-profile
-    if [ $? -le 0 ]
+    if [ $? -eq 0 ]
     then
         return -1
     fi
 
-    VULNS=$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE)
-    LICS=$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE)
-    OPS=$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE)
+    VULNS=$(jq -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE 2>/dev/null)
+    LICS=$(jq -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE 2>/dev/null)
+    OPS=$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE 2>/dev/null)
     if [ $MODE_MARKDOWN -eq 1 ]
     then
         ( echo
@@ -798,7 +808,7 @@ then
     do
         sleep 10
         VERURL=$(get_projver "$PROJECT" "$VERSION")
-        if [ $? -lt 0 ]
+        if [ $? -ne 0 ]
         then
             error "Unable to locate project $PROJECT version $VERSION"
         fi
@@ -815,12 +825,12 @@ then
 
     echo -n "detect_rescan.sh: Waiting for BOM completion: ..."
     wait_for_scans $VERURL
-    if [ $? -lt 0 ]
+    if [ $? -ne 0 ]
     then
         error "wait_for_scans() returned error"
     fi
     wait_for_bom_completion $VERURL
-    if [ $? -lt 0 ]
+    if [ $? -ne 0 ]
     then
         error "wait_for_bom_completion() returned error"
     fi
