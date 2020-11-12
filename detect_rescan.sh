@@ -737,7 +737,7 @@ run_report() {
     then
         NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Alow);!')
         NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Alow);!')
-        NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]($'{URL}'/components?filter=operationalRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Alow);!')
+        NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Alow);!')
 
         ( echo
         echo "## Component Risk"
