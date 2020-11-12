@@ -63,7 +63,7 @@ DETECT_VERSION=0
 MODE_QUIET=0
 MODE_REPORT=0
 MODE_MARKDOWN=0
-echo "detect_rescan.sh: Starting detect wrapper v1.1"
+echo "detect_rescan.sh: Starting detect wrapper v1.2"
 
 process_args() {
     prevarg=
@@ -659,12 +659,13 @@ run_report() {
     fi
     
     MARKDOWNFILE=$SCANLOC/blackduck.md
-echo $MODE_MARKDOWN
+
     if [ $MODE_MARKDOWN -eq 1 ]
     then
+        PROJURL=$(echo $URL | sed -e 's!/versions.*$!!')
         ( echo
         echo "# BLACK DUCK OSS SUMMARY REPORT"
-        echo "Project: '$PROJECT' Version: '$VERSION'"
+        echo "Project: '[$PROJECT]($PROJURL)' Version: '[$VERSION]($VERURL)'"
         echo
         echo "## Component Policy Status:" ) >$MARKDOWNFILE
     fi
@@ -696,13 +697,13 @@ echo $MODE_MARKDOWN
             then
                 if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
                 then
-                    echo "| In Violation Overidden | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
+                    echo "| In Violation Overidden | [${POL_STATS[$ind]}]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
                 elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
                 then
                     echo "| Not In Violation | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
                 elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
                 then
-                    echo "| In Violation | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
+                    echo "| In Violation | [${POL_STATS[$ind]}]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
                 fi
             fi
             if [ $MODE_REPORT -eq 1 ]
@@ -734,15 +735,18 @@ echo $MODE_MARKDOWN
     OPS=$(jq -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE 2>/dev/null)
     if [ $MODE_MARKDOWN -eq 1 ]
     then
+        NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Alow);!')
+        NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Alow);!')
+        NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]($'{URL}'/components?filter=operationalRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Alow);!')
+
         ( echo
         echo "## Component Risk"
         echo "| CATEGORY | CRIT | HIGH | MED | LOW | None |"
         echo "|----------|------:|-------:|------:|------:|-------:|"
-        echo "| Vulnerabilities | ${VULNS//,/ | } |"
-        echo "| Licenses | - | ${LICS//,/ | } |"
-        echo "| Op Risk | - | ${OPS//,/ | } |"
-        echo    
-        echo "See the scanned Black Duck Project [here]($URL/components)" )>>$MARKDOWNFILE
+        echo "| Vulnerabilities | ${NEWVULNS//;/ | } |"
+        echo "| Licenses | - | ${NEWLICS//;/ | } |"
+        echo "| Op Risk | - | ${NEWOPS//;/ | } |"
+        echo )>>$MARKDOWNFILE
     fi
     if [ $MODE_REPORT -eq 1 ]
     then
