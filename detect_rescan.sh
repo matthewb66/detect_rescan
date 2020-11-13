@@ -529,7 +529,7 @@ wait_for_scans() {
         then
             return 1
         fi
-        STATUSES=($(jq -r '[.items[].status[].status]' 2>/dev/null))
+        STATUSES=($(jq -r '[.items[].status[].status]' $TEMPFILE 2>/dev/null))
         index=0
         for stat in $(jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE 2>/dev/null)
         do
