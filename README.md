@@ -89,22 +89,22 @@ The example output of the `--report` option is shown below:
     Project: 'TP_test4' Version: 'AssemblyInfo.Version'
 
     Component Policy Status:
-      - Not In Violation:		230
+      - Not In Violation:	230
       - In Violation:		5
       - In Violation Overidden:	0
 
     Components in Violation:
-	    Component: 'AsyncIO/0.1.26' Policies Violated: 'MPL2' (MAJOR) 
-    	Component: 'JetBrains dotMemoryUnit 2.3/null' Policies Violated: 'License Unknown' (CRITICAL) 
-    	Component: 'Mono.Security/5.4.0.201' Policies Violated: 'License Unknown' (CRITICAL) 
-    	Component: 'nrfxlib-sys/1.2.0' Policies Violated: 'License Unknown' (CRITICAL) 
-    	Component: 'Strong Namer - Automatically Add Strong Names to References/0.2.5' Policies Violated: 'License Unknown' (CRITICAL) 
+		Component: 'AsyncIO/0.1.26' - Policies Violated: 'MPL2' (MAJOR) 
+		Component: 'JetBrains dotMemoryUnit 2.3/null' - Policies Violated: 'License Unknown' (CRITICAL) 
+		Component: 'Mono.Security/5.4.0.201' - Policies Violated: 'License Unknown' (CRITICAL) 
+		Component: 'nrfxlib-sys/1.2.0' - Policies Violated: 'License Unknown' (CRITICAL) 
+		Component: 'Strong Namer - Automatically Add Strong Names to References/0.2.5' - Policies Violated: 'License Unknown' (CRITICAL) 
 
-    Component Risk:			CRIT	HIGH	MED 	LOW 	None
-				                ----	----	--- 	--- 	----
-	   Vulnerabilities		0     0	    3	    0	    232
-	   Licenses		        -	    4	    79	  0	    152
-     Op Risk			      -	    27	  91	  42	  75
+    Component Risk:		CRIT	HIGH	MED 	LOW 	None
+				----	----	--- 	--- 	----
+	Vulnerabilities		0     	0	3	0	232
+	Licenses		-	4	79	0	152
+	Op Risk			-	27	91	42	75
 
     See Black Duck Project at:
     https://xxxx.blackduck.synopsys.com/api/projects/ec40e9fb-b792-495-a052-683409749a02/versions/bb370377-a5e-4da4-9239-d01fe5717f6a/components
