@@ -118,7 +118,7 @@ process_args() {
             if [[ $arg == ${opt}* ]]
             then
                 DETECT_ACTION=1
-                msg "detect_rescan: Detect Action identified - will rerun Detect after upload and scan completion"
+                msg "Detect Action identified - will rerun Detect after upload and scan completion"
             fi
         done
 
@@ -673,17 +673,17 @@ return
         if [ -d "$RUNDIR/bdio" ]
         then
             rm -rf "$RUNDIR/bdio"
-            msg "detect_rescan: Deleting $RUNDIR/bdio"
+            msg "Deleting $RUNDIR/bdio"
         fi
         if [ -d "$RUNDIR/extractions" ]
         then
             rm -rf "$RUNDIR/extractions"
-            msg "detect_rescan: Deleting $RUNDIR/extractions"
+            msg "Deleting $RUNDIR/extractions"
         fi
         if [ -d "$RUNDIR/scan" ]
         then
             rm -rf "$RUNDIR/scan"
-            msg "detect_rescan: Deleting $RUNDIR/scan"
+            msg "Deleting $RUNDIR/scan"
         fi
     fi
 }
@@ -812,6 +812,7 @@ run_report() {
                 if [ $MODE_TESTXML -eq 1 ]
                 then
                     echo "<testcase name='$COMPNAME'>" >>$XMLFILE
+                    echo -n "<error message='$COMPNAME violates the following policies: " >>$XMLFILE
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -831,11 +832,18 @@ run_report() {
                     fi
                     if [ $MODE_TESTXML -eq 1 ]
                     then
-                        echo "<error message='$COMPNAME' violates the following policies: '$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,))'></error></testcase>" >>$XMLFILE
+                        echo "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)), " >>$XMLFILE
                     fi
                     ((sevind++))
                 done
-                echo
+                if [ $MODE_TESTXML -eq 1 ]
+                then
+                    echo "'></error></testcase>" >>$XMLFILE
+                fi
+                if [ $MODE_REPORT -eq 1 ]
+                then
+                    echo
+                fi
                 IFS=
             else
                 if [ $MODE_TESTXML -eq 1 ]
