@@ -26,21 +26,19 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 
 # PREREQUISITES
 
-The script requires a bash shell to run.
+* The script requires a bash shell to run.
 
-The following additional programs must be installed in the environment and the script will check for them:
+* The following additional programs must be installed in the environment and the script will check for them:
+    - cksum (usually installed on MacOS & Linux)
+    - curl
+    - jq
+  Please refer to your platform documentation to install these.
 
-- cksum (usually installed on MacOS & Linux)
-- curl
-- jq
+* The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned to read and update this custom field.
 
-Please refer to your platform documentation to install these.
+* Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent that the script should be modified to write to a persistent location to ensure the file is saved.
 
-The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned to read and update this custom field.
-
-Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent that the script should be modified to write to a persistent location to ensure the file is saved.
-
-The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
+* The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
 
 # CUSTOM FIELD CREATION
 
