@@ -16,57 +16,74 @@
 #   Same as detect.sh
 #
 
-DETECT=$(mktemp -u)
+output() {
+    echo "detect_rescan: $*"
+}
+
+output "Starting Detect Rescan wrapper v1.4"
+
+DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
+TEMPFILE2=$(mktemp -u)
 LOGFILE=$(mktemp -u)
-
-error () {
-    echo "ERROR: detect_rescan.sh: $*" >$LOGFILE
-    cat $LOGFILE
-    end 1
-}
-
-end () {
-    rm -f $TEMPFILE $DETECT $LOGFILE
-    exit $1
-}
-
-prereqs() {
-    ret=0
-    for prog in cksum curl jq
-    do
-        hash $prog >/dev/null 2>&1
-        if [ $? -ne 0 ]
-        then
-            echo ERROR: $prog program required
-            ret=1
-        fi
-    done
-    return $ret
-}
-
-prereqs
-if [ $? -ne 0 ]
-then
-    end 1
-fi
 
 ACTION_ARGS=( "--blackduck.timeout" "--detect.force.success" "--detect.notices.report" "--detect.policy.check.fail.on.severities" "--detect.risk.report.pdf" "--detect.wait.for.results" )
 API_TOKEN=$BLACKDUCK_API_TOKEN
 BD_URL=$BLACKDUCK_URL
 YML=
-ARGS=
+DETARGS=
 SCANLOC=.
+RUNDIR=
+PROJECT=
+VERSION=
+SIGFOLDER=
 DETECT_ACTION=0
 DETECT_PROJECT=0
 DETECT_VERSION=0
 MODE_QUIET=0
 MODE_REPORT=0
 MODE_MARKDOWN=0
-echo "detect_rescan.sh: Starting detect wrapper v1.2"
+MODE_PREVFILE=0
+SIGTIME=86400
+PREVSCANDATA=
+PROJEXISTS=0
+DETECT_SCRIPT=
+MODE_RESET=0
+
+BOM_FILES=()
+BOM_HASHES=()
+PREV_FILES=()
+PREV_HASHES=()
+UNMATCHED_BOMS=()
+
+error() {
+    echo "ERROR: detect_rescan: $*" >$LOGFILE
+    cat $LOGFILE
+    end 1
+}
+
+end() {
+    rm -f $TEMPFILE $TEMPFILE2 $DETECT_TMP $LOGFILE
+    exit $1
+}
+
+prereqs() {
+    local ret=0
+    for prog in cksum curl jq java
+    do
+        hash $prog >/dev/null 2>&1
+        if [ $? -ne 0 ]
+        then
+            output "ERROR: $prog program required"
+            ret=1
+        fi
+    done
+    return $ret
+}
 
 process_args() {
-    prevarg=
+    local prevarg=
+    DETARGS=
     for arg in $*
     do
         if [[ $arg == --blackduck.offline.mode=* ]]
@@ -89,7 +106,7 @@ process_args() {
             DETECT_VERSION=1
         elif [[ $arg == --spring.profiles.active=* ]]
         then
-            YML="application-`echo $arg | cut -f2 -d=`.yml"
+            YML="application-$(echo $arg | cut -f2 -d=).yml"
             if [ ! -r $YML ]
             then
                 YML=
@@ -100,9 +117,10 @@ process_args() {
             if [[ $arg == ${opt}* ]]
             then
                 DETECT_ACTION=1
-                echo "detect_rescan.sh: Detect Action identified - will rerun Detect after upload and scan completion"
+                msg "detect_rescan: Detect Action identified - will rerun Detect after upload and scan completion"
             fi
         done
+
         if [ "$arg" == "--report" ]
         then
             MODE_REPORT=1
@@ -112,11 +130,27 @@ process_args() {
         elif [ "$arg" == "--markdown" ]
         then
             MODE_MARKDOWN=1
+        elif [ "$arg" == "--file" ]
+        then
+            MODE_PREVFILE=1
+        elif [ "$arg" == "--reset" ]
+        then
+            MODE_RESET=1
+        elif [[ $arg == --detectscript=* ]]
+        then
+            DETECT_SCRIPT=$(echo $arg | cut -f2 -d=)
+            if [ ! -r "$DETECT_SCRIPT" ]
+            then
+                error "Detect script $DETECT_SCRIPT does not exist"
+            fi
+        elif [[ $arg == --sigtime=* ]]
+        then
+            SIGTIME=$(echo $arg | cut -f2 -d=)
         elif [[ $arg == --* ]]
         then
             if [ ! -z "$prevarg" ]
             then
-                ARGS="$ARGS '$prevarg'"
+                DETARGS="$DETARGS '$prevarg'"
             fi
             prevarg=$arg
         else
@@ -125,10 +159,15 @@ process_args() {
         if [[ $prevarg == --detect.source.path=* ]]
         then
             SCANLOC=$(echo $prevarg | cut -f2 -d=)
-            SCANLOC=$(cd $SCANLOC; pwd)
+            SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
         fi
     done
-    ARGS="$ARGS '$prevarg'"
+    if [[ $prevarg == --detect.source.path=* ]]
+    then
+        SCANLOC=$(echo $prevarg | cut -f2 -d=)
+        SCANLOC=$(cd $SCANLOC; pwd)
+    fi
+    DETARGS="$DETARGS '$prevarg'"
     if [ ! -z "$YML" ]
     then
         API=$(grep '^blackduck.api.token' $YML)
@@ -142,42 +181,54 @@ process_args() {
             BD_URL=$(echo $URL | cut -c2 -d' ')
         fi
     fi
-    if [ -z "$BD_URL" -o -z "$API_TOKEN" ]
-    then
-        return 1
-    fi
-    return 0
 }
-
-process_args $*
-if [ $? -ne 0 ]
-then
-    error "Blackduck.url or blackduck.api.token not set - unable to run detect_rescan"
-fi
 
 # echo $API_TOKEN
 # echo $BD_URL
 # echo ARGS=$ARGS
 
-RUNDIR=
-PROJECT=
-VERSION=
-SIGFOLDER=
-run_detect_offline() {
-    curl -s -L https://detect.synopsys.com/detect.sh > $DETECT 2>/dev/null
-    if [ ! -r $DETECT ]
-    then
-        return 1
-    fi
-    chmod +x $DETECT
-
+msg() {
     if [ $MODE_QUIET -eq 0 ]
     then
-        $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true | tee $TEMPFILE
+        output "$*"
+    fi
+}
+
+get_token() {
+    rm -f $TEMPFILE
+    curl -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
+    if [ $? -ne 0 ] || [ ! -r "$TEMPFILE" ]
+    then
+        error "Cannot obtain auth token from BD Server"
+    fi
+    local TOKEN=$(jq -r '.bearerToken' $TEMPFILE 2>/dev/null)
+    if [ -z "$TOKEN" ]
+    then
+        error "Cannot obtain auth token from BD Server"
+    fi
+    echo $TOKEN
+}
+
+run_detect_offline() {
+    if [ -z "$DETECT_SCRIPT" ]
+    then
+        curl -s -L https://detect.synopsys.com/detect.sh > $DETECT_TMP 2>/dev/null
+        if [ ! -r $DETECT_TMP ]
+        then
+            error "Unable to download detect.sh from https://detect.synopsys.com - use --detect=PATH_TO_DETECT.sh"
+        fi
+        chmod +x $DETECT_TMP
+        DETECT_SCRIPT=$DETECT_TMP
+    fi
+
+    rm -f $TEMPFILE
+    if [ $MODE_QUIET -eq 0 ]
+    then
+        $DETECT_SCRIPT $DETARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true 2>/dev/null | tee $TEMPFILE
         RET=${PIPESTATUS[0]}
     else
-        echo "detect_rescan.sh: Running Detect offline ..."
-        $DETECT $ARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true >$TEMPFILE
+        output "Running Detect offline ..."
+        $DETECT_SCRIPT $DETARGS --detect.blackduck.signature.scanner.host.url=${BD_URL} --blackduck.offline.mode=true 2>/dev/null >$TEMPFILE
         RET=$?
         cat $TEMPFILE >>$LOGFILE
     fi
@@ -204,11 +255,8 @@ run_detect_offline() {
     return 0
 }
 
-BOM_FILES=()
-BOM_HASHES=()
-
 proc_bom_files() {
-    CWD=$(pwd)
+    local CWD=$(pwd)
     cd "$RUNDIR"
     if [ ! -d bdio ]
     then
@@ -232,46 +280,30 @@ proc_bom_files() {
     return 0
 }
 
-if [ -z "$API_TOKEN" -o -z "$BD_URL" ]
-then
-    error "No connection data for BD Server (BLACKDUCK_URL or BLACKDUCK_API_TOKEN)"
-fi
-
-curl -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
-TOKEN=$(cat $TEMPFILE | tr , '\n' | cut -f4 -d\")
-if [ -z "$TOKEN" ]
-then
-    error "Cannot obtain auth token"
-fi
-
-PREVSCANFILE="$(echo ${SCANLOC}| sed -e 's/\/$//')/.bdprevscan"
-
-PREV_FILES=()
-PREV_HASHES=()
-get_prev_boms() {
-    if [ -r "$PREVSCANFILE" ]
+proc_prev_bom_data() {
+    if [ ! -z "$PREVSCANDATA" ]
     then
-        while read myline
+        IFS='|'
+        for item in $PREVSCANDATA
         do
-            if [[ $myline == VER:* ]]
+            if [[ $item == VER:* ]]
             then
-                PREV_PROJ=$(echo $myline|cut -f2 -d:)
-                PREV_VER=$(echo $myline|cut -f3 -d:)
+                PREV_PROJ=$(echo $item|cut -f2 -d:)
+                PREV_VER=$(echo $item|cut -f3 -d:)
                 if [ "$PROJECT" != "$PREV_PROJ" -o "$VERSION" != "$PREV_VER" ]
                 then
                     break
                 fi
-            fi
-            if [[ $myline == BOM:* ]]
+            elif [[ $item == BOM:* ]]
             then
-                PREV_FILES+=($(echo $myline|cut -f2 -d:))
-                PREV_HASHES+=($(echo $myline|cut -f3 -d:))
+                PREV_FILES+=($(echo $item|cut -f2 -d:))
+                PREV_HASHES+=($(echo $item|cut -f3 -d:))
             fi
-        done <"$PREVSCANFILE"
+        done
+        IFS=
     fi
 }
 
-UNMATCHED_BOMS=()
 compare_boms() {
     for index in ${!BOM_FILES[@]}
     do
@@ -286,34 +318,17 @@ compare_boms() {
                 fi
             fi
         done
-        if [ $MATCHED -eq 0 ]
+        if [ $MATCHED -eq 0 ] || [ $MODE_RESET -eq 1 ]
         then
             UNMATCHED_BOMS+=($index)
         fi
     done
 }
 
-write_prevscanfile() {
-    SIGDATE=$1
-    if [ -r "$PREVSCANFILE" ]
-    then
-        rm -f "$PREVSCANFILE"
-    fi
-    echo "VER:$PROJECT:$VERSION" >$PREVSCANFILE
-    for index in ${!BOM_FILES[@]}
-    do
-        echo "BOM:${BOM_FILES[$index]}:${BOM_HASHES[$index]}" >>$PREVSCANFILE
-    done
-    if [ ! -z "$SIGDATE" ]
-    then
-        echo "SIG:$SIGDATE" >>$PREVSCANFILE
-    fi
-}
-
 upload_boms() {
-    echo -n "detect_rescan.sh: BOM files - Uploading ${#UNMATCHED_BOMS[@]} out of ${#BOM_FILES[@]} total ..."
-    UPLOADED=0
-    FAILED=0
+    echo -n "detect_rescan: BOM files - Uploading ${#UNMATCHED_BOMS[@]} out of ${#BOM_FILES[@]} total ..."
+    local UPLOADED=0
+    local FAILED=0
     for index in ${UNMATCHED_BOMS[@]}
     do
         echo -n '.'
@@ -330,7 +345,7 @@ upload_boms() {
         fi
     done
     echo
-    #echo "detect_rescan.sh: - $UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
+    msg "$UPLOADED Modified/New Bom Files Uploaded successfully ($FAILED Failed)"
     if [ $FAILED -gt 0 ]
     then
         return 1
@@ -339,21 +354,21 @@ upload_boms() {
 }
 
 run_detect_action() {
-    echo "detect_rescan.sh: Rerunning Detect to execute post-scan action"
+    output "Rerunning Detect to execute post-scan action"
     if [ $DETECT_PROJECT -eq 0 ]
     then
-        ARGS="$ARGS '--detect.project.name=$PROJECT'"
+        ARGS="$DETARGS '--detect.project.name=$PROJECT'"
     fi
     if [ $DETECT_VERSION -eq 0 ]
     then
-        ARGS="$ARGS '--detect.project.version.name=$VERSION'"
+        ARGS="$DETARGS '--detect.project.version.name=$VERSION'"
     fi
     if [ $MODE_QUIET -eq 0 ]
     then
-        $DETECT $ARGS --detect.tools=NONE
+        $DETECT_SCRIPT $DETARGS --detect.tools=NONE
         RET=$?
     else
-        $DETECT $ARGS --detect.tools=NONE >>$LOGFILE
+        $DETECT_SCRIPT $DETARGS --detect.tools=NONE >>$LOGFILE
         RET=$?
     fi
     return $RET
@@ -382,12 +397,12 @@ api_call() {
     fi
     if [ $(grep -c errorCode $TEMPFILE) -gt 0 ]
     then 
-        echo "Unknown API error" >&2
+        echo "Other API error $(jq '.errorCode' $TEMPFILE 2>/dev/null)" >&2
         return 1
     fi
     if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
     then 
-        COUNT=$(cat $TEMPFILE | jq -r '.totalCount' 2>/dev/null)
+        COUNT=$(jq -r '.totalCount' $TEMPFILE 2>/dev/null)
         if [ -z "$COUNT" ]
         then
             return 1
@@ -400,21 +415,22 @@ api_call() {
 get_project() {
     #Get  projects $1=projectname
 
-    SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
-    MYURL="$BD_URL/api/projects?q=name:$SEARCHPROJ"
+    #local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
+    local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /%20/g')
+    local MYURL="${BD_URL}/api/projects?q=name:${SEARCHPROJ}"
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -ne 0 ]
     then
         return 1
     fi
 
-    PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /+/g' -e 's/\"//g' -e 's:/:%2F:g')
-    PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /+/g' -e 's/\"//g')
+    local PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g')
+    local PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/\"//g')
 
-    PROJURL=
-    PROJNUM=1
-    FOUNDNUM=0
-    IFS=,; for PROJ in $PROJNAMES
+    local PROJNUM=1
+    local FOUNDNUM=0
+    local IFS=,
+    for PROJ in $PROJNAMES
     do
         if [ "$PROJ" == "$SEARCHPROJ" ]
         then
@@ -427,7 +443,7 @@ get_project() {
 
     if [ $FOUNDNUM -eq 0 ]
     then
-        return 1
+        return 0
     fi
 
     echo $PROJURLS | cut -f $FOUNDNUM -d ,
@@ -435,23 +451,26 @@ get_project() {
 }
 
 get_version() {
-    # Get Version
-    VERNAME=$(echo $2 | sed -e 's/ /%20/g' -e 's:/:%2F:g')
-    API_URL="${1}/versions?versionName%3A${VERNAME}"
-    SEARCHVERSION="${2}"
+    # Get Version  - $1 = PROJURL
+    local VERNAME=$(echo $2 | sed -e 's:/:%2F:g' -e 's/ /%20/g')
+    local API_URL="${1//\"}/versions?versionName%3A${VERNAME}"
+    #local SEARCHVERSION="${2// /_}"
+    #echo "get_version: SEARCHVERSION=$SEARCHVERSION" >&2
     api_call "${API_URL}" 'application/vnd.blackducksoftware.project-detail-4+json'
-    if [ $RET -ne 0 ]
+    if [ $? -ne 0 ]
     then
         return 1
     fi
 
-    VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /_/g' -e 's/\"//g')
-    VERURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g')
-    VERNUM=1
-    FOUNDVERNUM=0
-    IFS=,; for NAME in $VERNAMES
+    local VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g')
+    local VERURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g')
+    local VERNUM=1
+    local FOUNDVERNUM=0
+    local IFS=,
+    for NAME in $VERNAMES
     do
-        if [ "$NAME" == "$SEARCHVERSION" ]
+        #echo "get_version: NAME=$NAME" >&2
+        if [ "$NAME" == "$VERNAME" ]
         then
             FOUNDVERNUM=$VERNUM
             break
@@ -459,10 +478,10 @@ get_version() {
         ((VERNUM++))
     done
     IFS=
-
+    
     if [ $FOUNDVERNUM -eq 0 ]
     then
-        return 1
+        return 0
     fi
 
     echo $VERURLS | cut -f $FOUNDVERNUM -d ,
@@ -470,47 +489,56 @@ get_version() {
 }
 
 get_projver() {
-# $1=projectname $2=versionname
-    PURL=$(get_project "$1")
-    if [ $? -ne 0 ] || [ -z "$PURL" ]
-    then
-        return 1
-    fi
-
-    VURL=$(get_version "$PURL" "$2")
-    if [ $? -ne 0 ] || [ -z "$VURL" ]
-    then
-        return 1
-    fi
-
+# $1=projectname $2=versionname $3=number_of_10_sec_loops
+    local NUMLOOPS=${3:-0}
+    local COUNT=0
+    while [ $COUNT -le $NUMLOOPS ]
+    do
+        PURL=$(get_project "$1")
+        if [ $? -ne 0 ]
+        then
+            return 1
+        fi
+        #echo "get_projver: PURL=$PURL" >&2
+        if [ ! -z "$PURL" ]
+        then
+            VURL=$(get_version "$PURL" "$2")
+            if [ $? -ne 0 ]
+            then
+                return 1
+            fi
+            #echo "get_projver: VURL=$VURL" >&2
+        fi
+        ((COUNT++))
+        if [ -z "$VURL" ]
+        then
+            sleep 10
+        else
+            break
+        fi
+    done
     echo $VURL
     return 0
 }
 
 wait_for_bom_completion() {
     # Check job status
-    api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
-    if [ $? -ne 0 ]
-    then
-        return 1
-    fi
-    STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
-
-    loop=0
+    local loop=0
     while [ $loop -lt 80 ]
     do
-        echo -n '.'
-        if [ "$STATUS" == "true" ]
-        then
-            break
-        fi
-        sleep 15
-        api_call "${1//[\"]}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
+        api_call "${1//\"}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
         if [ $? -ne 0 ]
         then
             return 1
         fi
-        STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
+        local STATUS=$(jq -r '.upToDate' $TEMPFILE 2>/dev/null)
+
+        if [ "$STATUS" == "true" ]
+        then
+            break
+        fi
+        echo -n '.'
+        sleep 15
         ((loop++))
     done
     echo
@@ -518,84 +546,94 @@ wait_for_bom_completion() {
 }
 
 wait_for_scans() {
-    loop=0
-    while [ $loop -gt 80 ]
+    local loop=0
+    while [ $loop -lt 80 ]
     do
-        echo -n '.'
         # Check scan status
-        COMPLETE=1
-        api_call "${1//[\"]}/codelocations" 'application/vnd.blackducksoftware.internal-1+json'
+        api_call "${1//\"}/codelocations" 'application/vnd.blackducksoftware.internal-1+json'
         if [ $? -ne 0 ]
         then
             return 1
         fi
-        STATUSES=($(jq -r '[.items[].status[].status]' $TEMPFILE 2>/dev/null))
-        index=0
-        for stat in $(jq -r '[.items[].status[].operationNameCode]|@tsv' $TEMPFILE 2>/dev/null)
+        local STATUSES=$(jq -r '[.items[].status[].status]|@csv' $TEMPFILE 2>/dev/null)
+        local OPCODES=$(jq -r '[.items[].status[].operationNameCode]|@csv' $TEMPFILE 2>/dev/null)
+        local DONE=1
+        local index=1
+        local IFS=,
+        for stat in $STATUSES 
         do
-            if [ $stat == 'ServerScanning' -a "${STATUSES[$index]}" != 'COMPLETED' ]
-            then
-                COMPLETE=0
-            fi
+            IFS=
+            OPCODE=$(echo $OPCODES | cut -f$index -d,)
             ((index++))
+            if [ $OPCODE != '"ServerScanning"' ]
+            then
+                continue
+            fi
+            if [ $stat != '"COMPLETED"' ]
+            then
+                DONE=0
+            fi
         done
-        if [ $COMPLETE -eq 1 ]
+        if [ $DONE -eq 1 ]
         then
-            break
+            return 0
         fi
+        ((loop++))
+        echo -n '.'
+        sleep 15
     done
     return 0
 }
 
 check_sigscan() {
-    DIFFTIME=$1
-    SIGFOLDER=$2
-    NOWDATE=`date '+%Y%m%d%H%M%S'`
-    SIGDATE=$NOWDATE
-    PROCSIGSCAN=0
-    if [ ! -z "$SIGFOLDER" ]
+    local DIFFTIME=$1
+    local NOWDATE=$(date '+%Y%m%d%H%M%S')
+    local SIGDATE=$NOWDATE
+    local PROCSIGSCAN=0
+    if [ $MODE_RESET -eq 1 ]
     then
-        if [ -r "$PREVSCANFILE" ]
-        then
-            while read myline
-            do
-                if [[ $myline == VER:* ]]
-                then
-                    PREV_PROJ=$(echo $myline|cut -f2 -d:)
-                    PREV_VER=$(echo $myline|cut -f3 -d:)
-                    if [ "$PROJECT" != "$PREV_PROJ" -o "$VERSION" != "$PREV_VER" ]
-                    then
-                        break
-                    fi
-                fi
-                if [[ $myline == SIG:* ]]
-                then
-                    PREV_SIGSCAN_DATE=$(echo $myline|cut -f2 -d:)
-                fi
-            done < "$PREVSCANFILE"
-            if [ ! -z "$PREV_SIGSCAN_DATE" ]
-            then
-                NOWDATE=$(date '+%Y%m%d%H%M%S')
-                DIFF=$((NOWDATE-PREV_SIGSCAN_DATE))
-                if [ $DIFF -gt $DIFFTIME ]
-                then
-                    PROCSIGSCAN=1
-                else
-                    SIGDATE=$PREV_SIGSCAN_DATE
-                fi
-            else
-                PROCSIGSCAN=1
-            fi
-        else
-            PROCSIGSCAN=1
-        fi
+        echo $NOWDATE
+        return 1
     fi
+    local PREV_SIGSCAN_DATE=
+    local IFS='|'
+    for item in $PREVSCANDATA
+    do
+        if [[ $item == VER:* ]]
+        then
+            local PREV_PROJ=$(echo $item|cut -f2 -d:)
+            local PREV_VER=$(echo $item|cut -f3 -d:)
+            if [ "$PROJECT" != "$PREV_PROJ" -o "$VERSION" != "$PREV_VER" ]
+            then
+                break
+            fi
+        fi
+        if [[ $item == SIG:* ]]
+        then
+            PREV_SIGSCAN_DATE=$(echo $item|cut -f2 -d:)
+        fi
+    done
+    IFS=
+
+    if [ ! -z "$PREV_SIGSCAN_DATE" ] && [ "$PREV_SIGSCAN_DATE" -gt 0 ]
+    then
+        DIFF=$((NOWDATE-PREV_SIGSCAN_DATE))
+        if [ $DIFF -gt $DIFFTIME ]
+        then
+            PROCSIGSCAN=1
+        else
+            SIGDATE=$PREV_SIGSCAN_DATE
+        fi
+    else
+        PROCSIGSCAN=1
+    fi
+
     echo $SIGDATE
     return $PROCSIGSCAN
 }
 
 proc_sigscan() {
-    CWD=$(pwd)
+    local CWD=$(pwd)
     cd $SIGFOLDER
     if [ ! -d data ]
     then
@@ -610,7 +648,7 @@ proc_sigscan() {
             cd $CWD
             return 1
         fi
-        echo "detect_rescan.sh: Signature Scan - Uploading ..."
+        output "Signature Scan - Uploading ..."
         curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
@@ -625,28 +663,29 @@ proc_sigscan() {
 }
 
 cleanup() {
+return
     if [ ! -z "$RUNDIR" ]
     then
         if [ -d "$RUNDIR/bdio" ]
         then
             rm -rf "$RUNDIR/bdio"
-            #echo "detect_rescan.sh: Deleting $RUNDIR/bdio"
+            msg "detect_rescan: Deleting $RUNDIR/bdio"
         fi
         if [ -d "$RUNDIR/extractions" ]
         then
             rm -rf "$RUNDIR/extractions"
-            #echo "detect_rescan.sh: Deleting $RUNDIR/extractions"
+            msg "detect_rescan: Deleting $RUNDIR/extractions"
         fi
         if [ -d "$RUNDIR/scan" ]
         then
             rm -rf "$RUNDIR/scan"
-            #echo "detect_rescan.sh: Deleting $RUNDIR/scan"
+            msg "detect_rescan: Deleting $RUNDIR/scan"
         fi
     fi
 }
 
 run_report() {
-    URL=$1
+    local URL=$1
     if [ -z "$URL" ]
     then
         return 1
@@ -658,7 +697,7 @@ run_report() {
         return 1
     fi
     
-    MARKDOWNFILE=$SCANLOC/blackduck.md
+    local MARKDOWNFILE=$SCANLOC/blackduck.md
 
     if [ $MODE_MARKDOWN -eq 1 ]
     then
@@ -666,8 +705,7 @@ run_report() {
         ( echo
         echo "# BLACK DUCK OSS SUMMARY REPORT"
         echo "Project: '[$PROJECT]($PROJURL)' Version: '[$VERSION]($VERURL)'"
-        echo
-        echo "## Component Policy Status:" ) >$MARKDOWNFILE
+        echo ) >$MARKDOWNFILE
     fi
     if [ $MODE_REPORT -eq 1 ]
     then
@@ -680,50 +718,114 @@ run_report() {
     POL_STATUS=$(jq -r '.overallStatus' $TEMPFILE 2>/dev/null)
     if [ "$POL_STATUS" == "IN_VIOLATION" ]
     then
-        POL_TYPES=($(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE 2>/dev/null))
-        POL_STATS=($(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE 2>/dev/null))
+        POL_TYPES=$(jq -r '.componentVersionStatusCounts[].name' $TEMPFILE 2>/dev/null | tr '\n' ',')
+        POL_STATS=$(jq -r '.componentVersionStatusCounts[].value' $TEMPFILE 2>/dev/null | tr '\n' ',')
         if [ $MODE_MARKDOWN -eq 1 ]
         then
-            ( echo "| Component Policy Status | Count |"
+            ( echo "## Component Policy Status:"
+            echo
+            echo "| Component Policy Status | Count |"
             echo "|-------------------------|-------:|" ) >>$MARKDOWNFILE
         fi
         if [ $MODE_REPORT -eq 1 ]
         then
             echo Component Policy Status:
         fi
-        for ind in ${!POL_TYPES[@]}
+        IFS=,
+        INDEX=1
+        for type in ${POL_TYPES}
         do
+            IFS=
             if [ $MODE_MARKDOWN -eq 1 ]
             then
-                if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+                if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
                 then
-                    echo "| In Violation Overidden | [${POL_STATS[$ind]}]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
-                elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+                    echo "| In Violation Overidden | [$(echo $POL_STATS | cut -f$INDEX -d,)]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
+                elif [ "$type" == "NOT_IN_VIOLATION" ]
                 then
-                    echo "| Not In Violation | ${POL_STATS[$ind]} |" >>$MARKDOWNFILE
-                elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
+                    echo "| Not In Violation | $(echo $POL_STATS | cut -f$INDEX -d,) |" >>$MARKDOWNFILE
+                elif [ "$type" == "IN_VIOLATION" ]
                 then
-                    echo "| In Violation | [${POL_STATS[$ind]}]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
+                    echo "| In Violation | [$(echo $POL_STATS | cut -f$INDEX -d,)]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
                 fi
             fi
             if [ $MODE_REPORT -eq 1 ]
             then
-                if [ "${POL_TYPES[$ind]}" == "IN_VIOLATION_OVERRIDDEN" ]
+                if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
                 then
-                    echo "	- In Violation Overidden:	${POL_STATS[$ind]}"
-                elif [ "${POL_TYPES[$ind]}" == "NOT_IN_VIOLATION" ]
+                    echo "  - In Violation Overidden:	$(echo $POL_STATS | cut -f$INDEX -d,)"
+                elif [ "$type" == "NOT_IN_VIOLATION" ]
                 then
-                    echo "	- Not In Violation:		${POL_STATS[$ind]}"
-                elif [ "${POL_TYPES[$ind]}" == "IN_VIOLATION" ]
+                    echo "  - Not In Violation:		$(echo $POL_STATS | cut -f$INDEX -d,)"
+                elif [ "$type" == "IN_VIOLATION" ]
                 then
-                    echo "	- In Violation:			${POL_STATS[$ind]}"
+                    echo "  - In Violation:		$(echo $POL_STATS | cut -f$INDEX -d,)"
                 fi
             fi
+            ((INDEX++))
         done
-    else
-        echo "No policy violations"
-    fi
+        
+        echo
+        echo "Components in Violation:"
+        api_call "${URL}/components?limit=5000" 'application/vnd.blackducksoftware.bill-of-materials-4+json'
+        if [ $? -ne 0 ]
+        then
+            return 1
+        fi
     
+        rm -f $TEMPFILE2
+        jq -r '.items[].componentName' $TEMPFILE 2>/dev/null >$TEMPFILE2
+        local COMPPOLS=$(jq -r '.items[].policyStatus' $TEMPFILE 2>/dev/null | tr '\n' ',')
+        local COMPVERS=$(jq -r '.items[].componentVersionName' $TEMPFILE 2>/dev/null | tr '\n' '|')
+        local COMPURLS=$(jq -r '.items[]._meta.href' $TEMPFILE 2>/dev/null | tr '\n' ',')
+        local INDEX=1
+        while read comp
+        do
+            COMPPOL=$(echo $COMPPOLS | cut -f$INDEX -d,)
+            COMPURL=$(echo $COMPURLS | cut -f$INDEX -d,)
+            if [ "$COMPPOL" == "IN_VIOLATION" ]
+            then
+                if [ $MODE_REPORT -eq 1 ]
+                then
+                    echo -n "	Component: '$comp/$(echo $COMPVERS|cut -f$INDEX -d'|')' Policies Violated: "
+                fi
+                api_call ${COMPURL}/policy-rules
+                if [ $? -ne 0 ]
+                then
+                    continue
+                fi
+            
+                POLNAMES=$(jq -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|')
+                POLSEVERITIES=$(jq -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',')
+                IFS='|'
+                sevind=1
+                for polname in $POLNAMES
+                do
+                    if [ $MODE_REPORT -eq 1 ]
+                    then
+                        echo -n "'$polname' ($(echo $POLSEVERITIES|cut -f$sevind -d,)) "
+                    fi
+                    ((sevind++))
+                done
+                echo
+                IFS=
+            fi
+            ((INDEX++))
+        done <$TEMPFILE2
+    else
+        if [ $MODE_REPORT -eq 1 ]
+        then
+            echo Component Policy Status:
+            echo " - No policy violations"
+        fi
+        if [ $MODE_MARKDOWN -eq 1 ]
+        then
+            ( echo "## Component Policy Status:"
+            echo"- No policy violations" ) >>$MARKDOWNFILE
+        fi
+    fi
+
+
     api_call ${URL}/risk-profile
     if [ $? -ne 0 ]
     then
@@ -763,69 +865,231 @@ run_report() {
         echo 
         echo "----------------------------------------------------------------------"
     fi
+
 }
+
+get_prev_scandata() {
+    if [ $MODE_PREVFILE -eq 0 ]
+    then
+        local VURL=$1
+        api_call $VURL/custom-fields 'application/vnd.blackducksoftware.project-detail-5+json'
+        if [ $? -ne 0 ]
+        then
+            return 1
+        fi
+
+        local FIELDS=$(jq -r '[.items[].label]|@csv' $TEMPFILE 2>/dev/null)
+        local DATAS=$(jq -r '[.items[].values[0]]|@csv' $TEMPFILE 2>/dev/null)
+        #URLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null)
+        local FNUM=1
+        local IFS=,
+        for FIELD in $FIELDS
+        do
+            if [ $FIELD == '"prevScanData"' ]
+            then
+                IFS=
+                DATA=$(echo $DATAS | cut -f$FNUM -d,)
+                #PREVSCANFIELDURL=$(echo $URLS | cut -f$FNUM -d,)
+                echo ${DATA//\"/}
+                return 0
+            fi
+            ((FNUM++))
+        done
+        IFS=
+    else
+        if [ -r "$PREVSCANFILE" ]
+        then
+            cat "$PREVSCANFILE" | tr '\n' '|'
+        fi
+        return 0
+    fi
+    return 1
+}
+
+update_prevscandata() {
+    local URL=${2//\"}
+    local SIGDATE=$1
+    if [ $MODE_PREVFILE -eq 1 ]
+    then
+        if [ -r "$PREVSCANFILE" ]
+        then
+            rm -f "$PREVSCANFILE"
+        fi
+        echo "VER:$PROJECT:$VERSION" >$PREVSCANFILE
+        for index in ${!BOM_FILES[@]}
+        do
+            echo "BOM:${BOM_FILES[$index]}:${BOM_HASHES[$index]}" >>$PREVSCANFILE
+        done
+        if [ ! -z "$SIGDATE" ]
+        then
+            echo "SIG:$SIGDATE" >>$PREVSCANFILE
+        fi
+        if [ -r "$PREVSCANFILE" ]
+        then
+            msg "Unable to write scan data to $PREVSCANFILE"
+        else
+            msg "Scan data stored in file $PREVSCANFILE"
+        fi
+    elif [ ! -z "$URL" ]
+    then
+        local SCANDATA="VER:$PROJECT:$VERSION"
+        for index in ${!BOM_FILES[@]}
+        do
+            SCANDATA="${SCANDATA}|BOM:${BOM_FILES[$index]}:${BOM_HASHES[$index]}"
+        done
+        if [ ! -z "$SIGDATE" ]
+        then
+            SCANDATA="${SCANDATA}|SIG:$SIGDATE"
+        fi
+        VAL='{"values": [ "'$SCANDATA'"] }'
+        #echo "update_prevscandata: VAL=$VAL" >&2
+        #echo "update_prevscandata: URL=$URL" >&2 
+        #echo "update_prevscandata: curl -X PUT --header \"Authorization: Bearer $TOKEN\" --header \"Content-Type: application/vnd.blackducksoftware.project-detail-5+json\" -d '$VAL' $URL"
+        curl -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
+        if [ $? -ne 0 ]
+        then
+            error "Unable to write scan data to Project Version custom field"
+        fi
+        local STATUS=$(jq '.errorMessage' $TEMPFILE 2>/dev/null)
+        if [ "$STATUS" != "null" ]
+        then
+            error "Unable to update custom scan field - $STATUS"
+        fi
+        msg "Scan data stored in Project Version custom field"
+    fi
+    return 0
+}
+
+get_scandata_url() {
+    local VURL=${1//\"}
+    api_call ${VURL}/custom-fields 'application/vnd.blackducksoftware.project-detail-5+json'
+    if [ $? -ne 0 ]
+    then
+        return 1
+    fi
+
+    local FIELDS=$(jq -r '[.items[].label]|@csv' $TEMPFILE 2>/dev/null)
+    local URLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null)
+    local FNUM=1
+    local IFS=,
+    for FIELD in $FIELDS
+    do
+        if [ $FIELD == '"prevScanData"' ]
+        then
+            IFS=
+            echo $URLS | cut -f$FNUM -d,
+            return 0
+        fi
+        ((FNUM++))
+    done
+    IFS=
+    return 1
+}
+
+##########################################################################################
+# MAIN LOGIC
+
+prereqs
+if [ $? -ne 0 ]
+then
+    end 1
+fi
+
+process_args $*
+if [ -z "$API_TOKEN" -o -z "$BD_URL" ]
+then
+    error "No connection data for BD Server (BLACKDUCK_URL or BLACKDUCK_API_TOKEN)"
+fi
+
+TOKEN=$(get_token)
 
 run_detect_offline
 if [ $? -ne 0 ]
 then
-    error "Detect returned error code"
+    error "Detect offline run returned an unexpected error"
 fi
 if [ -z "$RUNDIR" -o ! -d "$RUNDIR" ]
 then
     error "Unable to determine project folder from Detect run"
 fi
 
+PREVSCANFILE="${SCANLOC}/.bdprevscan"
+
+PREVSCANDATA=
+msg "Checking for existing project version ..."
+VERURL=$(get_projver "$PROJECT" "$VERSION" 0)
+if [ $? -eq 0 ] && [ ! -z "$VERURL" ]
+then
+    PREVSCANDATA=$(get_prev_scandata $VERURL)
+    if [ $? -ne 0 ]
+    then
+        error "prevScanData custom field does not exist in BD Server for project versions"
+    fi
+    if [ -z "$PREVSCANDATA" ]
+    then
+        msg "No previous scan data - all scans will be processed"
+    else
+        if [ $MODE_PREVFILE -eq 1 ]
+        then
+            msg "Previous scan data identified from .bdprevscan file"
+        else
+            msg "Previous scan data identified from prevScanData custom field"
+        fi
+        #echo "'$PREVSCANDATA'"
+    fi
+else
+    msg "Project '$PROJECT' version '$VERSION' does not exist yet"
+fi
+
+UPDATE_PREVSCANDATA=0
+msg "Checking for dependency scan files ..."
 proc_bom_files
 if [ $? -eq 0 ]
 then
-    get_prev_boms
+    proc_prev_bom_data
     compare_boms
     upload_boms
     if [ $? -ne 0 ]
     then
         error "Unable to upload BOM files"
     fi
+    if [ ${#UNMATCHED_BOMS[@]} -gt 0 ]
+    then
+        UPDATE_PREVSCANDATA=1
+    fi
+else
+    msg "No dependency scan files found"
 fi
 
-SIGDATE=$(check_sigscan 86400 $SIGFOLDER)
-PROCSIGSCAN=$?
-
-if [ $PROCSIGSCAN -eq 1 ]
+msg "Checking for signature scan ..."
+SIGDATE=$(check_sigscan $SIGTIME)
+if [ $? -eq 1 ]
 then
     proc_sigscan
     if [ $? -ne 0 ]
     then
         error "Unable to upload sig scan json"
     fi
+    UPDATE_PREVSCANDATA=1
 else
-    echo "detect_rescan.sh: Signature scan - NOT uploading as time since last scan not exceeded"
+    output "Not uploading Signature scan as time since last scan not exceeded"
+fi
+
+if [ $UPDATE_PREVSCANDATA -eq 1 -a -z "$VERURL" -a $MODE_PREVFILE -eq 0 ] || [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ] 
+then
+# Need to locate project after scan to update custom field
+    msg "Checking for project version after scan"
+    VERURL=$(get_projver "$PROJECT" "$VERSION" 6)
+    if [ $? -ne 0 ] || [ -z "$VERURL" ]
+    then
+        error "Unable to locate project '$PROJECT' version '$VERSION'"
+    fi
 fi
 
 RETURN=0
-VERURL=
 if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ]
 then
-    count=0
-    while true
-    do
-        sleep 10
-        VERURL=$(get_projver "$PROJECT" "$VERSION")
-        if [ $? -ne 0 ]
-        then
-            error "Unable to locate project $PROJECT version $VERSION"
-        fi
-        ((count++))
-        if [ $count -gt 12 ]
-        then
-            error "Unable to get Version URL for project"
-        fi
-        if [ ! -z "$VERURL" ]
-        then
-            break
-        fi
-    done
-
-    echo -n "detect_rescan.sh: Waiting for BOM completion: ..."
+    echo -n "detect_rescan: Waiting for BOM completion: ..."
     wait_for_scans $VERURL
     if [ $? -ne 0 ]
     then
@@ -842,18 +1106,23 @@ then
         RETURN=$?
         if [ $RETURN -ne 0 ]
         then
-            echo "detect_rescan.sh: Detect returned code $RETURN"
+            output "Detect returned code $RETURN"
         fi
     fi
 fi
 
-write_prevscanfile $SIGDATE
+if [ $UPDATE_PREVSCANDATA -eq 1 ]
+then
+    msg "Updating scan data for next run ..."
+    SCANFIELDURL=$(get_scandata_url $VERURL)
+    update_prevscandata $SIGDATE $SCANFIELDURL
+fi
 
 if [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ]
 then
     run_report $VERURL
 fi
 cleanup
-echo "detect_rescan.sh: Done (Return code $RETURN)"
+output "Done (Return code $RETURN)"
 
 end $RETURN
