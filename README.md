@@ -9,20 +9,20 @@ It does not represent any extension of licensed functionality of Synopsys softwa
 
 # OVERVIEW
 
-The script is intended to address issues caused by frequently calling the Black Duck Detect scanner within a CI/CD pipleine or automated build environment which can result in repeated scans being submitted and performance issues on the Black Duck server.
+The script is intended to address issues caused by frequently calling the Black Duck Detect scanner within a CI/CD pipleine or automated build environment which can result in repeated scans being submitted and performance issues on the Black Duck server. It can also optionally produce console outputs of project status after analysis.
 
 It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
 
 - Processes supplied Synpsys Detect options to determine if a post-action is required
-- Downloads and runs Detect offline with supplied options to perform standard scan
+- Downloads and runs Detect (detect.sh) offline with supplied options to perform a scan
 - Identifies the BOM and Signature scan files from offline run
-- Looks for previous scan record in .bdprevscan file in scanned project folder
-- Compares scanned BOM files and uploads if different/new to previous scan
-- Checks last date/time for signature scan and uploads if more than 24 hours or new scan
+- Looks for previous scan data (see below for location of this data) 
+- Compares scanned BOM files and upload files if different/new to previous scan
+- Checks last date/time for signature scan and uploads if more than specified period (24 hours by default) or new scan
 - If post-action or report required:
   - Waits for server-side scan and BOM completion
   - Runs Detect to perform post-action with no rescan
-- If --report or --markdown specified, produce summary reports (--markdown writes a file in MD format)
+- If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
 
 # PREREQUISITES
 
@@ -36,49 +36,81 @@ The following additional programs must be installed in the environment and the s
 
 Please refer to your platform documentation to install these.
 
-The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc.
+The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned to read and update this custom field.
 
-The script writes a file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs.
-If the project location is not persistent that the script should be modified to write to a persistent location to ensure the file is saved.
+Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent that the script should be modified to write to a persistent location to ensure the file is saved.
 
-# INSTALLATION
+The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
+
+# CUSTOM FIELD CREATION
+
+The default script operation is to store scan data in a custom field within Project Versions (unless the `--file` option is specified which will cause the scan data to be stored in the `.bdprevscan` file in the project folder).
+
+You will need to create a new custom field within Project Version with the name `prevScanData` and type `TextArea`.
+
+As an administrator, perform the following:
+1. Select the `Manage --> Custom Fields` option
+1. Select the `Project Version` table
+1. Select `Create`
+1. Choose type `Text Area`
+1. Enter the name `prevScanData` and click Save
+
+# INSTALLATION/USAGE
 
 The script can be downloaded and executed dynamically using the following command:
 
-    bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) DETECT_OPTIONS
+    bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) ARGUMENTS DETECT_OPTIONS
 
-where DETECT_OPTIONS are the standard Synopsys Detect options.
+where DETECT_OPTIONS are the standard Synopsys Detect options and ARGUMENTS are the additional detect_rescan arguments (see below).
 
 Alternatively the script can be downloaded and saved locally using:
 
     curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh > detect_rescan.sh
     chmod +x detect_rescan.sh
+    ./detect_rescan.sh ARGUMENTS DETECT_OPTIONS 
 
-# USAGE
+The Black Duck server URL and API token are required and can be specified either as environment variables (`BLACKDUCK_URL` and `BLACKDUCK_API_TOKEN`), in a project .yml (specified using `--spring.profiles.active`) or as command line arguments (`--blackduck.url` and `--blackduck.api.token`).
 
-The script provides 3 options in addition to the standard Synopsys Detect arguments as follows:
+# ARGUMENTS
 
-    --quiet - Use to hide Synopsys Detect standard output and other script notifications
-    --report - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
+The script provides some options in addition to the standard Synopsys Detect arguments as follows:
+
+    --quiet    - Hide Synopsys Detect standard output and other non-essential script notifications.
+    --report   - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
     --markdown - Write a project summary report to the blackduck.md file created in the project folder.
-    
+    --reset    - Force a scan irrespective of the previous scan data/time and then update the scan data.   
+    --detectscript=mydetect.sh - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
+
+# REPORT OUTPUT
+
 The example output of the `--report` option is shown below:
 
+    ----------------------------------------------------------------------
     BLACK DUCK OSS SUMMARY REPORT
+    Project: 'TP_test4' Version: 'AssemblyInfo.Version'
 
     Component Policy Status:
-    - In Violation Overidden:	0
-    - Not In Violation:		97
-    - In Violation:			1
+      - Not In Violation:		230
+      - In Violation:		5
+      - In Violation Overidden:	0
 
-    Component Risk:
-          			CRIT	HIGH	MED 	LOW 	None
-    Vulnerabilities		0	0	0	0	98
-    Licenses		-	0	63	0	35
-    Op Risk			-	10	39	12	37
+    Components in Violation:
+	    Component: 'AsyncIO/0.1.26' Policies Violated: 'MPL2' (MAJOR) 
+    	Component: 'JetBrains dotMemoryUnit 2.3/null' Policies Violated: 'License Unknown' (CRITICAL) 
+    	Component: 'Mono.Security/5.4.0.201' Policies Violated: 'License Unknown' (CRITICAL) 
+    	Component: 'nrfxlib-sys/1.2.0' Policies Violated: 'License Unknown' (CRITICAL) 
+    	Component: 'Strong Namer - Automatically Add Strong Names to References/0.2.5' Policies Violated: 'License Unknown' (CRITICAL) 
+
+    Component Risk:			CRIT	HIGH	MED 	LOW 	None
+				                ----	----	--- 	--- 	----
+	   Vulnerabilities		0     0	    3	    0	    232
+	   Licenses		        -	    4	    79	  0	    152
+     Op Risk			      -	    27	  91	  42	  75
 
     See Black Duck Project at:
-    https://myserver.blackduck.synopsys.com/api/projects/c6fb44b7-9325-4b76-9a42-af1b6dda456f/versions/9afa1046-4a23-4621-9a26-19ae95d4fa89/components
+    https://xxxx.blackduck.synopsys.com/api/projects/ec40e9fb-b792-495-a052-683409749a02/versions/bb370377-a5e-4da4-9239-d01fe5717f6a/components
+
+    ----------------------------------------------------------------------
 
 # INTEGRATIONS & SUPPORT
 
