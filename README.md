@@ -75,11 +75,12 @@ The Black Duck server URL and API token are required and can be specified either
 
 The script provides some options in addition to the standard Synopsys Detect arguments as follows:
 
-    --quiet    - Hide Synopsys Detect standard output and other non-essential script notifications.
-    --report   - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
-    --markdown - Write a project summary report to the blackduck.md file created in the project folder.
-    --reset    - Force a scan irrespective of the previous scan data/time and then update the scan data.   
+    --quiet         - Hide Synopsys Detect standard output and other non-essential script notifications.
+    --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
+    --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
+    --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.   
     --detectscript=mydetect.sh - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
+    --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).
 
 # REPORT OUTPUT
 
