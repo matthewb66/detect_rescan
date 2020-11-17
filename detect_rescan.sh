@@ -20,7 +20,7 @@ output() {
     echo "detect_rescan: $*"
 }
 
-output "Starting Detect Rescan wrapper v1.4"
+output "Starting Detect Rescan wrapper v1.5"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -44,6 +44,7 @@ MODE_QUIET=0
 MODE_REPORT=0
 MODE_MARKDOWN=0
 MODE_PREVFILE=0
+MODE_TESTXML=0
 SIGTIME=86400
 PREVSCANDATA=
 PROJEXISTS=0
@@ -133,6 +134,9 @@ process_args() {
         elif [ "$arg" == "--file" ]
         then
             MODE_PREVFILE=1
+        elif [ "$arg" == "--testxml" ]
+        then
+            MODE_TESTXML=1
         elif [ "$arg" == "--reset" ]
         then
             MODE_RESET=1
@@ -764,15 +768,30 @@ run_report() {
             fi
             ((INDEX++))
         done
-        
-        echo
-        echo "Components in Violation:"
+    fi
+    
+    XMLFILE='blackduck.xml'
+    if [ "$POL_STATUS" == "IN_VIOLATION" ] || [ $MODE_TESTXML -eq 1 ]
+    then
+        if [ $MODE_REPORT -eq 1 ]
+        then
+            echo
+            echo "Components in Violation:"
+        fi
+        if [ $MODE_TESTXML -eq 1 ]
+        then
+            ( echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<testsuites disabled="" errors="" failures="" tests="" time="" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="junit.xsd">'
+            echo '<testsuite disabled="" errors="" failures="" hostname="" id="" name="Black Duck policy status" package="" skipped="" tests="" time="" timestamp="">'
+            echo '<properties><property name="" value=""/></properties>' ) >$XMLFILE
+        fi
+
         api_call "${URL}/components?limit=5000" 'application/vnd.blackducksoftware.bill-of-materials-4+json'
         if [ $? -ne 0 ]
         then
             return 1
         fi
-    
+
         rm -f $TEMPFILE2
         jq -r '.items[].componentName' $TEMPFILE 2>/dev/null >$TEMPFILE2
         local COMPPOLS=$(jq -r '.items[].policyStatus' $TEMPFILE 2>/dev/null | tr '\n' ',')
@@ -783,11 +802,16 @@ run_report() {
         do
             COMPPOL=$(echo $COMPPOLS | cut -f$INDEX -d,)
             COMPURL=$(echo $COMPURLS | cut -f$INDEX -d,)
+            COMPNAME="$comp/$(echo $COMPVERS|cut -f$INDEX -d'|')"
             if [ "$COMPPOL" == "IN_VIOLATION" ]
             then
                 if [ $MODE_REPORT -eq 1 ]
                 then
-                    echo -n "	Component: '$comp/$(echo $COMPVERS|cut -f$INDEX -d'|')' Policies Violated: "
+                    echo -n "	Component: '$COMPNAME' Policies Violated: "
+                fi
+                if [ $MODE_TESTXML -eq 1 ]
+                then
+                    echo "<testcase name='$COMPNAME'>" >>$XMLFILE
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -805,13 +829,28 @@ run_report() {
                     then
                         echo -n "'$polname' ($(echo $POLSEVERITIES|cut -f$sevind -d,)) "
                     fi
+                    if [ $MODE_TESTXML -eq 1 ]
+                    then
+                        echo "<error message='$COMPNAME' violates the following policies: '$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,))'></error></testcase>" >>$XMLFILE
+                    fi
                     ((sevind++))
                 done
                 echo
                 IFS=
+            else
+                if [ $MODE_TESTXML -eq 1 ]
+                then
+                    echo "<testcase name='$COMPNAME'></testcase>" >>$XMLFILE
+                fi
             fi
             ((INDEX++))
         done <$TEMPFILE2
+        if [ $MODE_TESTXML -eq 1 ]
+        then
+            ( echo '<system-out>system-out</system-out>'
+            echo '    <system-err>system-err</system-err></testsuite>'
+            echo '</testsuites>' ) >>$XMLFILE
+        fi
     else
         if [ $MODE_REPORT -eq 1 ]
         then
