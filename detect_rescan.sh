@@ -20,7 +20,7 @@ output() {
     echo "detect_rescan: $*"
 }
 
-output "Starting Detect Rescan wrapper v1.5"
+output "Starting Detect Rescan wrapper v1.6"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -66,6 +66,13 @@ error() {
 end() {
     rm -f $TEMPFILE $TEMPFILE2 $DETECT_TMP $LOGFILE
     exit $1
+}
+
+debug() {
+    if [ ! -z "$DEBUG" ]
+    then
+        echo "detect_rescan: DEBUG - $*" >&2
+    fi
 }
 
 prereqs() {
@@ -418,17 +425,19 @@ api_call() {
 
 get_project() {
     #Get  projects $1=projectname
-
+    debug "get_project(): ARG1=$1"
     #local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
-    local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /%20/g')
+    local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g' )
     local MYURL="${BD_URL}/api/projects?q=name:${SEARCHPROJ}"
+    debug "get_project(): API_URL=$MYURL"
+
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -ne 0 ]
     then
         return 1
     fi
 
-    local PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g')
+    local PROJNAMES=$(jq -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g'  -e 's/\[/%5B/g' -e 's/\]/%5D/g')
     local PROJURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/\"//g')
 
     local PROJNUM=1
@@ -456,7 +465,7 @@ get_project() {
 
 get_version() {
     # Get Version  - $1 = PROJURL
-    local VERNAME=$(echo $2 | sed -e 's:/:%2F:g' -e 's/ /%20/g')
+    local VERNAME=$(echo $2 | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g')
     local API_URL="${1//\"}/versions?versionName%3A${VERNAME}"
     #local SEARCHVERSION="${2// /_}"
     #echo "get_version: SEARCHVERSION=$SEARCHVERSION" >&2
@@ -466,7 +475,7 @@ get_version() {
         return 1
     fi
 
-    local VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g')
+    local VERNAMES=$(jq -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g'  -e 's/\[/%5B/g' -e 's/\]/%5D/g')
     local VERURLS=$(jq -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g')
     local VERNUM=1
     local FOUNDVERNUM=0
@@ -494,6 +503,7 @@ get_version() {
 
 get_projver() {
 # $1=projectname $2=versionname $3=number_of_10_sec_loops
+    debug "get_projver(): ARG1=$1 ARG2=$2 ARG3=$3"
     local NUMLOOPS=${3:-0}
     local COUNT=0
     while [ $COUNT -le $NUMLOOPS ]
@@ -503,7 +513,7 @@ get_projver() {
         then
             return 1
         fi
-        #echo "get_projver: PURL=$PURL" >&2
+        debug "get_projver(): PURL=$PURL"
         if [ ! -z "$PURL" ]
         then
             VURL=$(get_version "$PURL" "$2")
@@ -511,7 +521,7 @@ get_projver() {
             then
                 return 1
             fi
-            #echo "get_projver: VURL=$VURL" >&2
+            debug "get_projver(): VURL=$VURL"
         fi
         ((COUNT++))
         if [ -z "$VURL" ]
@@ -820,8 +830,8 @@ run_report() {
                     continue
                 fi
             
-                POLNAMES=$(jq -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|')
-                POLSEVERITIES=$(jq -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',')
+                POLNAMES=$(jq -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | sed -e "s/'/\"/g" )
+                POLSEVERITIES=$(jq -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | sed -e "s/'/\"/g" )
                 IFS='|'
                 sevind=1
                 for polname in $POLNAMES
@@ -832,7 +842,7 @@ run_report() {
                     fi
                     if [ $MODE_TESTXML -eq 1 ]
                     then
-                        echo "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)), " >>$XMLFILE
+                        echo -n "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)), " >>$XMLFILE
                     fi
                     ((sevind++))
                 done
