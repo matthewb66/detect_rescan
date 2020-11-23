@@ -128,7 +128,16 @@ The following sample yml task shows how the detect_rescan.sh script can be used 
 	  inputs:
 	    targetType: 'inline'
 	    script: |
-	      bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) --blackduck.api.token=MmEwZTdkNjAtNjU5MS00MWEwLThjZTgtZGI2MTFiNDA2ZDkxOjRhYzc2YTcyLTdiNjMtNGQxZC05ZTNhLTY0NDM0EwZjhjZg== --blackduck.trust.cert=true --blackduck.url=https://serverXX.blackduck.synopsys.com --detect.project.name=MYproject --detect.project.version.name=1.0  --detect.policy.check.fail.on.severities=ALL --report --testxml
+	      bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) --blackduck.api.token=MmEwZTdkNjAtNjU5MS00MWEwLThjZTgtZGI2MTFiNDA2ZDkxOjRhYzc2YTcyLTdiNjMtNGQxZC05ZTNhLTY0NDM0EwZjhjZg== --blackduck.trust.cert=true --blackduck.url=https://serverXX.blackduck.synopsys.com --detect.project.name=MYproject --detect.project.version.name=1.0  --detect.policy.check.fail.on.severities=ALL --quiet --report --testxml
+
+For Windows targets, the Windows Bash is not 100% compliant and the following modified yml may be required:
+
+	- task: Bash@3
+	  inputs:
+	    targetType: 'inline'
+	    script: |
+	      curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh > detect_rescan.sh
+	      ./detect_rescan.sh --blackduck.api.token=MmEwZTdkNjAtNjU5MS00MWEwLThjZTgtZGI2MTFiNDA2ZDkxOjRhYYTcyLTdiNjMtNGQxZC05ZTNhLTY0NDM0MjEwZjhjZg== --blackduck.trust.cert=true --blackduck.url=https://server.blackduck.synopsys.com --detect.detector.search.depth=1 --detect.project.name=Myproject --detect.project.version.name=1.0 --detect.policy.check.fail.on.severities=ALL --quiet --report --testxml
 
 # TESTXML OUTPUT
 
