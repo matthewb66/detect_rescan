@@ -76,7 +76,8 @@ The script provides some options in addition to the standard Synopsys Detect arg
     --quiet         - Hide Synopsys Detect standard output and other non-essential script notifications.
     --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
     --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
-    --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.   
+    --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.
+    --testxml	    - Produce output blackduck.xml file containing test results in Junit format.
     --detectscript=mydetect.sh - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
     --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).
 
@@ -118,3 +119,29 @@ The `detect_rescan.sh` script should be used in place of Synopsys Detect at the 
 It is not suitable for use with Synopsys Detect CI/CD plugins and other integrations which do not call the detect.sh script or which call the Detect jar directly.
 
 The script operates under Linux/MacOS via bash, but can also be used under the Bash task in Azure DevOps on Windows.
+
+# AZURE DEVOPS EXAMPLE INTEGRATION
+
+The following sample yml task shows how the detect_rescan.sh script can be used as a Bash step within an ADO pipeline. This would replace any other integration to call Synopsys Detect including the ADO plugin or direct call to detect.sh. This step can be used on either Linux, MacOS or Windows targets.
+
+	- task: Bash@3
+	  inputs:
+	    targetType: 'inline'
+	    script: |
+	      bash <(curl -s -L https://raw.github.com/matthewb66/detect_rescan/main/detect_rescan.sh) --blackduck.api.token=MmEwZTdkNjAtNjU5MS00MWEwLThjZTgtZGI2MTFiNDA2ZDkxOjRhYzc2YTcyLTdiNjMtNGQxZC05ZTNhLTY0NDM0EwZjhjZg== --blackduck.trust.cert=true --blackduck.url=https://serverXX.blackduck.synopsys.com --detect.project.name=MYproject --detect.project.version.name=1.0  --detect.policy.check.fail.on.severities=ALL --report --testxml
+
+# TESTXML OUTPUT
+
+The --testxml option will cause detect_rescan.sh to generate an output file blackduck.xml which includes scan results in Junit format.
+The test data represents the OSS components identified in the Black Duck scan, with components which have 1 or more policy violation being marked as a failed test.
+Components without policy violation are shown as passed tests.
+
+The json file can be imported as test results using the CI features for Junit test analysis.
+
+For example, for Azure DevOps, the following yml fragment can be used to import the blackduck.xml file:
+
+	- task: PublishTestResults@2
+	  displayName: 'Publish Test Results **/blackduck.xml'
+	  inputs:
+	    testResultsFiles: '**/blackduck.xml'
+
