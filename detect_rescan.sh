@@ -20,7 +20,7 @@ output() {
     echo "detect_rescan: $*"
 }
 
-output "Starting Detect Rescan wrapper v1.6"
+output "Starting Detect Rescan wrapper v1.7-Beta"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -58,7 +58,7 @@ PREV_HASHES=()
 UNMATCHED_BOMS=()
 
 error() {
-    echo "ERROR: detect_rescan: $*" >$LOGFILE
+    echo "detect_rescan: ERROR: $*" >$LOGFILE
     cat $LOGFILE
     end 1
 }
@@ -176,7 +176,7 @@ process_args() {
     if [[ $prevarg == --detect.source.path=* ]]
     then
         SCANLOC=$(echo $prevarg | cut -f2 -d=)
-        SCANLOC=$(cd $SCANLOC; pwd)
+        SCANLOC=$(cd "$SCANLOC"; pwd)
     fi
     DETARGS="$DETARGS '$prevarg'"
     if [ ! -z "$YML" ]
@@ -271,7 +271,7 @@ proc_bom_files() {
     cd "$RUNDIR"
     if [ ! -d bdio ]
     then
-        cd $CWD
+        cd "$CWD"
         return 1
     fi
     cd bdio
@@ -279,7 +279,7 @@ proc_bom_files() {
     do
         if [ ! -r "$bom" ]
         then
-            cd $CWD
+            cd "$CWD"
             return 1
         fi
         CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
@@ -287,7 +287,7 @@ proc_bom_files() {
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
     done
-    cd $CWD
+    cd "$CWD"
     return 0
 }
 
@@ -397,18 +397,18 @@ api_call() {
     RET=$?
     if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
     then
-        echo "API Error: Curl returned $RET" >&2
+        echo "detect_rescan: ERROR: API Error - Curl returned $RET" >&2
         return 1
     fi
 
     if [ $(grep -c 'failed authorization' $TEMPFILE) -gt 0 ]
     then 
-        echo "Server or Project Authorization issue" >&2
+        echo "detect_rescan: ERROR: Server or Project Authorization issue" >&2
         return 1
     fi
     if [ $(grep -c errorCode $TEMPFILE) -gt 0 ]
     then 
-        echo "Other API error $(jq '.errorCode' $TEMPFILE 2>/dev/null)" >&2
+        echo "detect_rescan: ERROR: Other API error $(jq '.errorCode' $TEMPFILE 2>/dev/null)" >&2
         return 1
     fi
     if [ $(grep -c totalCount $TEMPFILE) -gt 0 ]
@@ -648,10 +648,10 @@ check_sigscan() {
 
 proc_sigscan() {
     local CWD=$(pwd)
-    cd $SIGFOLDER
+    cd "$SIGFOLDER"
     if [ ! -d data ]
     then
-        cd $CWD
+        cd "$CWD"
         return 1
     fi
     cd data
@@ -659,7 +659,7 @@ proc_sigscan() {
     do
         if [ ! -r "$sig" ]
         then
-            cd $CWD
+            cd "$CWD"
             return 1
         fi
         output "Signature Scan - Uploading ..."
@@ -669,10 +669,10 @@ proc_sigscan() {
         -H 'cache-control: no-cache' \
         --data-binary "@$sig" >/dev/null 2>&1
         RET=$?
-        cd $CWD
+        cd "$CWD"
         return $RET
     done
-    cd $CWD
+    cd "$CWD"
     return 1
 }
 
