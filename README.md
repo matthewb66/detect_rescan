@@ -9,13 +9,13 @@ It does not represent any extension of licensed functionality of Synopsys softwa
 
 # OVERVIEW
 
-The script is intended to address issues caused by frequently calling the Black Duck Detect scanner within a CI/CD pipleine or automated build environment which can result in repeated scans being submitted and performance issues on the Black Duck server. It can also optionally produce console outputs of project status after analysis.
+The script is intended to address issues caused by frequently calling the Black Duck Detect scanner within a CI/CD pipleine or automated build environment which can result in repeated scans being submitted and performance issues on the Black Duck server. It can also produce console and other optional outputs of project status after analysis.
 
 It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
 
 - Processes supplied Synpsys Detect options to determine if a post-action is required
 - Downloads and runs Detect (detect.sh) offline with supplied options to perform a scan
-- Identifies the BOM and Signature scan files from offline run
+- Identifies the BOM and Signature scan files from offline run (note the script should only be used for projects where 1 signature scan has been mapped)
 - Looks for previous scan data (see below for location of this data) 
 - Compares scanned BOM files and upload files if different/new to previous scan
 - Checks last date/time for signature scan and uploads if more than specified period (24 hours by default) or new scan
@@ -36,7 +36,7 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 
 * The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned (or be the project creator) to read and update this custom field.
 
-* Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent, then file .bdprevscan file should be copied to a permanent location (and downloaded before subsequent runs) or the script should be modified to write to a persistent location to ensure the file is saved between runs.
+* Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent, then the .bdprevscan file should be copied to a permanent location (and copied back before subsequent runs) or the script could be modified to write to a persistent location to ensure the file is saved between runs.
 
 * The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
 
@@ -46,14 +46,16 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 
 The default script operation is to store scan data in a custom field within Project Versions (unless the `--file` option is specified which will cause the scan data to be stored in the `.bdprevscan` file in the project folder).
 
-You will need to create a new custom field within Project Version with the name `prevScanData` and type `TextArea`.
+You will need to administer the server to create a new custom field within Project Version with the name `prevScanData` and type `TextArea`.
 
-As an administrator, perform the following:
+As an administrator, perform the following in the Black Duck Web UI:
 1. Select the `Manage --> Custom Fields` option
 1. Select the `Project Version` table
 1. Select `Create`
 1. Choose type `Text Area`
 1. Enter the name `prevScanData` and click Save
+
+Ensure the custom field is enabled before continuing.
 
 # INSTALLATION/USAGE
 
@@ -69,7 +71,7 @@ Alternatively the script can be downloaded and saved locally using:
     chmod +x detect_rescan.sh
     ./detect_rescan.sh ARGUMENTS DETECT_OPTIONS 
 
-The Black Duck server URL and API token are required and can be specified either as environment variables (`BLACKDUCK_URL` and `BLACKDUCK_API_TOKEN`), in a project .yml (specified using `--spring.profiles.active`) or as command line arguments (`--blackduck.url` and `--blackduck.api.token`).
+The Black Duck server URL and API token are required and can be specified either as environment variables (`BLACKDUCK_URL` and `BLACKDUCK_API_TOKEN`), in a project application-project.yml file (specified using `--spring.profiles.active`) or as command line arguments (`--blackduck.url` and `--blackduck.api.token`).
 
 # ARGUMENTS
 
@@ -79,8 +81,9 @@ The script provides some options in addition to the standard Synopsys Detect arg
     --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
     --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
     --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.
-    --testxml	    - Produce output blackduck.xml file containing test results in Junit format.
-    --detectscript=mydetect.sh - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
+    --testxml.      - Produce output blackduck.xml file containing test results in Junit format.
+    --detectscript=mydetect.sh
+                    - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
     --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).
 
 # REPORT OUTPUT
@@ -122,9 +125,9 @@ Set the environment variable `DEBUG` to any non-blank value to cause the script 
 
 The `detect_rescan.sh` script should be used in place of Synopsys Detect at the same integration points where a direct call is made to the detect.sh script.
 
-It is not suitable for use with Synopsys Detect CI/CD plugins and other integrations which do not call the detect.sh script or which call the Detect jar directly.
+It is not suitable for use with Synopsys Detect CI/CD plugins and other integrations which do not call the detect.sh (bash) script or which call the Detect jar directly.
 
-The script operates under Linux/MacOS via bash, but can also be used under the Bash task in Azure DevOps on Windows.
+The script operates under Linux/MacOS via bash, but can also be used under the Bash task in Azure DevOps on Windows. The script may also operate under the Windows Linux subsystem although this has not been tested.
 
 # AZURE DEVOPS EXAMPLE INTEGRATION
 
