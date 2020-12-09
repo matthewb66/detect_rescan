@@ -34,9 +34,9 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
     - jq
   Please refer to your platform documentation to install these.
 
-* The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned to read and update this custom field.
+* The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned (or be the project creator) to read and update this custom field.
 
-* Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent that the script should be modified to write to a persistent location to ensure the file is saved.
+* Alternatively, if the `--file` option is specified, the script will write the file `.bdprevscan` to the top-level folder of the project to be scanned which needs to be retained between runs. If the project location is not persistent, then file .bdprevscan file should be copied to a permanent location (and downloaded before subsequent runs) or the script should be modified to write to a persistent location to ensure the file is saved between runs.
 
 * The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
 
@@ -113,6 +113,10 @@ The example output of the `--report` option is shown below:
     https://xxxx.blackduck.synopsys.com/api/projects/ec40e9fb-b792-495-a052-683409749a02/versions/bb370377-a5e-4da4-9239-d01fe5717f6a/components
 
     ----------------------------------------------------------------------
+
+# DEBUG MODE
+
+Set the environment variable `DEBUG` to any non-blank value to cause the script to output extra debug messages. Note this will also cause the Detect program to output additional information.
 
 # INTEGRATIONS & SUPPORT
 
