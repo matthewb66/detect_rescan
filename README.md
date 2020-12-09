@@ -40,6 +40,8 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 
 * The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
 
+* Detect_rescan should not be used for projects where more than 1 signature scan has been mapped.
+
 # CUSTOM FIELD CREATION
 
 The default script operation is to store scan data in a custom field within Project Versions (unless the `--file` option is specified which will cause the scan data to be stored in the `.bdprevscan` file in the project folder).
