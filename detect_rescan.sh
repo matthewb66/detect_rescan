@@ -29,7 +29,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.8-Beta"
+output "Starting Detect Rescan wrapper v1.9-Dev"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -99,28 +99,28 @@ msg() {
 }
 
 install_jq() {
-#     JQPATH=$(mktemp -d)
-#     PLATFORM=$(uname -a 2>/dev/null| cut -f1 -d' ')
-#     debug "install_jq(): PLATFORM = $PLATFORM"
-#     if [ "$PLATFORM" == "Linux" ]
-#     then
-#         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-#     elif [ "$PLATFORM" == "Darwin" ]
-#     then
-#         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-osx-amd64
-#     else
-#         return 1
-#     fi
-#     curl -s -L $JQURL -o $JQPATH/jq >/dev/null 2>&1
-#     if [ $? -ne 0 ] || [ ! -r $JQPATH/jq ]
-#     then
-#         return 1
-#     fi
-#     chmod +x $JQPATH/jq
-#     echo $JQPATH/jq
-#     debug "install_jq(): jq downloaded from $JQURL and installed to $JQPATH/jq"
-#     JQTEMPDIR=$JQPATH
-    return 1
+     JQPATH=$(mktemp -d)
+     PLATFORM=$(uname -a 2>/dev/null| cut -f1 -d' ')
+     debug "install_jq(): PLATFORM = $PLATFORM"
+     if [ "$PLATFORM" == "Linux" ]
+     then
+         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+     elif [ "$PLATFORM" == "Darwin" ]
+     then
+         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-osx-amd64
+     else
+         return 1
+     fi
+     curl -s -L $JQURL -o $JQPATH/jq >/dev/null 2>&1
+     if [ $? -ne 0 ] || [ ! -r $JQPATH/jq ]
+     then
+         return 1
+     fi
+     chmod +x $JQPATH/jq
+     echo $JQPATH/jq
+     debug "install_jq(): jq downloaded from $JQURL and installed to $JQPATH/jq"
+     JQTEMPDIR=$JQPATH
+     return 0
 }
 
 prereqs() {
