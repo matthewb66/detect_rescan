@@ -1082,7 +1082,7 @@ run_report() {
             echo "- Severity = $VULNSEV"
             echo "- Score = $VULNSCORE"
             echo "- Status = $VULNSTAT"
-            echo "- Component = $VULNCOMP/$VULNVER"
+            echo "- Component = $VULNCOMP/$VULNCOMPVER"
             echo "See ${BD_URL}/api/vulnerabilities/$VULNNAME/overview"
             echo "'></error></testcase>" ) >>$XMLVULN
         done < $TEMPFILE2
