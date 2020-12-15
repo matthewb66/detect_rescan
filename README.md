@@ -162,4 +162,5 @@ For example, for Azure DevOps, the following yml fragment can be used to import 
 	  displayName: 'Publish Test Results **/blackduck.xml'
 	  inputs:
 	    testResultsFiles: '**/blackduck.xml'
+	    testRunTitle: 'Black Duck Vulnerabilities'
 
