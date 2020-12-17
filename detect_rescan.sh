@@ -12,14 +12,15 @@
 # 7. If post-action or report required:
 #       - Waits for server-side scan and BOM completion
 #       - Runs Detect to perform post-action with no rescan
-# 8. If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)#
+# 8. If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
 # 
 # Arguments:
 #  --quiet         - Hide Synopsys Detect standard output and other non-essential script notifications.
 #  --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
 #  --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
 #  --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.
-#  --testxml       - Produce output blackduck.xml file containing test results in Junit format.
+#  --testxml       - Produce output vulns.xml and policies.xml files containing test results in Junit format.
+#  --curlopts      - Add an option to curl (usually -k) to support insecure connections to a BD server without authorised certificate (alternatively set CURLOPTS env var)
 #  --detectscript=mydetect.sh
 #                  - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
 #  --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).#   Same as detect.sh
@@ -29,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.10-Dev"
+output "Starting Detect Rescan wrapper v1.11-Dev"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -152,6 +153,7 @@ prereqs() {
 }
 
 process_args() {
+    local UNSUPPORTED=0
     local prevarg=
     DETARGS=
     for arg in $*
@@ -173,6 +175,26 @@ process_args() {
         elif [[ $arg == --detect.project.name=* ]]
         then
             DETECT_PROJECT=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.snippet.matching=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.snippet.matching option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.upload.source.mode=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.upload.source.mode option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.copyright.search=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.copyright.search option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.license.search=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.license.search option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.binary.scan.* ]]
+        then
+            debug "process_args(): --detect.binary.scan.* identified"
+            UNSUPPORTED=1
         elif [[ $arg == --detect.project.version.name=* ]]
         then
             DETECT_VERSION=1
@@ -230,6 +252,9 @@ process_args() {
         then
             SIGTIME=$(echo $arg | cut -f2 -d=)
             debug "process_args(): SIGTIME set to $SIGTIME"
+        elif [[ $arg == --curlopts=* ]]
+        then
+            CURLOPTS=$(echo $arg | cut -f2 -d=)
         elif [[ $arg == --* ]]
         then
             if [ ! -z "$prevarg" ]
@@ -253,6 +278,10 @@ process_args() {
     fi
     debug "process_args(): SCANLOC set to $SCANLOC"
 
+    if [ $UNSUPPORTED -eq 1 ]
+    then
+        error "Unsupported Detect options specified (Snippet or Binary)"
+    fi
     DETARGS="$DETARGS '$prevarg'"
     if [ ! -z "$YML" ]
     then
@@ -273,7 +302,7 @@ process_args() {
 
 get_token() {
     rm -f $TEMPFILE
-    curl -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
+    curl $CURLOPTS -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
     if [ $? -ne 0 ] || [ ! -r "$TEMPFILE" ]
     then
         error "Cannot obtain auth token from BD Server"
@@ -291,7 +320,7 @@ get_token() {
 run_detect_offline() {
     if [ -z "$DETECT_SCRIPT" ]
     then
-        curl -s -L https://detect.synopsys.com/detect.sh > $DETECT_TMP 2>/dev/null
+        curl $CURLOPTS -s -L https://detect.synopsys.com/detect.sh > $DETECT_TMP 2>/dev/null
         if [ ! -r $DETECT_TMP ]
         then
             error "Unable to download detect.sh from https://detect.synopsys.com - use --detect=PATH_TO_DETECT.sh"
@@ -427,7 +456,7 @@ upload_boms() {
     for index in ${UNMATCHED_BOMS[@]}
     do
         echo -n '.'
-        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl $CURLOPTS -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/vnd.blackducksoftware.bdio+json' \
         -H 'cache-control: no-cache' \
@@ -480,7 +509,7 @@ api_call() {
         HEADER="$2"
     fi
     rm -f $TEMPFILE
-    curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
+    curl $CURLOPTS -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
     RET=$?
     if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
     then
@@ -772,14 +801,14 @@ proc_sigscan() {
         fi
         debug "proc_sigscan(): Processing sig scan file $SIGFOLDER/data/$sig"
 #        output "Signature Scan - Uploading ..."
-        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl $CURLOPTS -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
         -H 'cache-control: no-cache' \
         --data-binary "@$sig" >/dev/null 2>&1
         if [ $? -eq 0 ]
         then
-            local SIGSCANNAME=$(jq '.name' "$sig")
+            local SIGSCANNAME=$($JQ '.name' "$sig")
             if [ ! -z "$SIGSCANNAME" ]
             then
                 echo $SIGSCANNAME
@@ -1177,7 +1206,7 @@ update_prevscandata() {
         #echo "update_prevscandata: VAL=$VAL" >&2
         #echo "update_prevscandata: URL=$URL" >&2 
         #echo "update_prevscandata: curl -X PUT --header \"Authorization: Bearer $TOKEN\" --header \"Content-Type: application/vnd.blackducksoftware.project-detail-5+json\" -d '$VAL' $URL"
-        curl -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
+        curl $CURLOPTS -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
         if [ $? -ne 0 ]
         then
             error "Unable to write scan data to Project Version custom field"
