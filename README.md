@@ -22,7 +22,8 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 - If post-action or report required:
   - Waits for server-side scan and BOM completion
   - Runs Detect to perform post-action with no rescan
-- If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
+- If `--report` or `--markdown` specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
+- If `--testxml` specified, produce junit XML test output files (policies.xml and vulns.xml)
 
 # PREREQUISITES
 
@@ -152,7 +153,7 @@ For Windows targets, the Windows Bash is not 100% compliant and the following mo
 
 # TESTXML OUTPUT
 
-The --testxml option will cause detect_rescan.sh to generate output files policies.xml and vulns.xml which includes scan results in Junit format.
+The `--testxml` option will cause detect_rescan.sh to generate output files `policies.xml` and `vulns.xml` which includes scan results in Junit format.
 The `policies.xml` test data represents the OSS components identified in the Black Duck scan, with components which have 1 or more policy violation being marked as a failed test. Components without policy violation are shown as passed tests.
 The `vulns.xml` test data represents the outstanding vulnerabilities from the Black Duck project (remediated/ignored vulnerabilities) with open vulnerabilities being marked as a failed test.
 
