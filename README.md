@@ -1,4 +1,4 @@
-# detect_rescan.sh 
+# detect_rescan.sh - v1.12
 Bash script to wrapper Synopsys Detect for Black Duck scanning to reduce duplicate scan uploads between runs for use in frequent automated scan processes and optionally produce immediate project security summary reports.
 
 # INTRODUCTION
@@ -13,7 +13,7 @@ The script is intended to address issues caused by frequently calling the Black 
 
 It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
 
-- Processes supplied Synpsys Detect options to determine if a post-action is required
+- Processes supplied Synpsys Detect options to determine if a post-action is required (also looks at environment variables and options in a .yml if specified)
 - Downloads and runs Detect (detect.sh) offline with supplied options to perform a scan
 - Identifies the BOM and Signature scan files from offline run (note the script should only be used for projects where 1 signature scan has been mapped)
 - Looks for previous scan data (see below for location of this data) 
@@ -22,7 +22,8 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 - If post-action or report required:
   - Waits for server-side scan and BOM completion
   - Runs Detect to perform post-action with no rescan
-- If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
+- If `--report` or `--markdown` specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
+- If `--testxml` specified, produce junit XML test output files (policies.xml and vulns.xml)
 
 # PREREQUISITES
 
@@ -31,8 +32,7 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 * The following additional programs must be installed in the environment and the script will check for them:
     - cksum (usually installed on MacOS & Linux)
     - curl
-    - jq
-  Please refer to your platform documentation to install these.
+  Please refer to your platform documentation to install these. The program jq is also required but will be downloaded dynamically if not available.
 
 * The script uses a custom field (`prevScanData` of type `Text Area`) in Project Versions by default to store previous scan data. The API key used for scanning will require the `Bom Manager` permission within the projects to be scanned (or be the project creator) to read and update this custom field.
 
@@ -41,6 +41,8 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 * The script uses Synopsys Detect to perform scans, and has the same prerequisites including internet connectivity to download the script, connection to Black Duck server to upload scans, access to package managers for dependency analysis etc. 
 
 * Detect_rescan should not be used for projects where more than 1 signature scan has been mapped.
+
+* Detect_rescan does not support Snippet or Binary scan types (Dependency and Signature scans are supported).
 
 # CUSTOM FIELD CREATION
 
@@ -81,7 +83,8 @@ The script provides some options in addition to the standard Synopsys Detect arg
     --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
     --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
     --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.
-    --testxml       - Produce output blackduck.xml file containing test results in Junit format.
+    --testxml       - Produce output policies.xml and vulns.xml files containing test results in Junit format.
+    --curlopts      - Add specified option to curl command (usually -k for insecure connections with self-signed certificate). The env var CURLOPTS can also be set to specify curl command options.
     --detectscript=mydetect.sh
                     - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
     --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).
@@ -150,17 +153,15 @@ For Windows targets, the Windows Bash is not 100% compliant and the following mo
 
 # TESTXML OUTPUT
 
-The --testxml option will cause detect_rescan.sh to generate an output file blackduck.xml which includes scan results in Junit format.
-The test data represents the OSS components identified in the Black Duck scan, with components which have 1 or more policy violation being marked as a failed test.
-Components without policy violation are shown as passed tests.
+The `--testxml` option will cause detect_rescan.sh to generate output files `policies.xml` and `vulns.xml` which includes scan results in Junit format.
+The `policies.xml` test data represents the OSS components identified in the Black Duck scan, with components which have 1 or more policy violation being marked as a failed test. Components without policy violation are shown as passed tests.
+The `vulns.xml` test data represents the outstanding vulnerabilities from the Black Duck project (remediated/ignored vulnerabilities) with open vulnerabilities being marked as a failed test.
 
 The json file can be imported as test results using the CI features for Junit test analysis.
 
-For example, for Azure DevOps, the following yml fragment can be used to import the blackduck.xml file:
+For example, in Azure DevOps, the following yml fragment can be used to import the policies.xml (or vulns.xml) file:
 
 	- task: PublishTestResults@2
-	  displayName: 'Publish Test Results **/blackduck.xml'
+	  displayName: 'Publish Test Results **/policies.xml'
 	  inputs:
-	    testResultsFiles: '**/blackduck.xml'
-	    testRunTitle: 'Black Duck Vulnerabilities'
-
+	    testResultsFiles: '**/policies.xml'
