@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.11-Dev"
+output "Starting Detect Rescan wrapper v1.12-Dev"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -200,7 +200,7 @@ process_args() {
             DETECT_VERSION=1
         elif [[ $arg == --spring.profiles.active=* ]]
         then
-            YML="application-$(echo $arg | cut -f2 -d=).yml"
+            local YML="application-$(echo $arg | cut -f2 -d=).yml"
             if [ ! -r $YML ]
             then
                 YML=
@@ -278,25 +278,102 @@ process_args() {
     fi
     debug "process_args(): SCANLOC set to $SCANLOC"
 
+    DETARGS="$DETARGS '$prevarg'"
+    #
+    # Check Environment variables
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_SNIPPET_MATCHING" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.snippet.matching option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_UPLOAD_SOURCE_MODE" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.upload.source.mode option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_COPYRIGHT_SEARCH" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.copyright.search option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_LICENSE_SEARCH" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.license.search option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_BINARY_SCAN_FILE_PATH" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.file.path identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_BINARY_SCAN_FILE_NAME_PATTERNS" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.file.name.patterns identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_SOURCE_PATH" ] && [ -d "$DETECT_SOURCE_PATH" ]
+    then
+        debug "process_args(): detect.source.path '$DETECT_SOURCE_PATH' identified from environment variable"
+        SCANLOC=$(cd "$DETECT_SOURCE_PATH"; pwd)
+    fi
+
+    #
+    # Check YML properties file
+    if [ ! -z "$YML" ]
+    then
+        debug "process_args(): YML file $YML identified"
+        local API=$(grep '^blackduck.api.token:' $YML| cut -f2 -d' ')
+        if [ ! -z "API" ]
+        then
+            API_TOKEN=$API
+            debug "process_args(): BLACKDUCK_API_TOKEN identified from $YML file"
+        fi
+        local URL=$(grep '^blackduck.url:' $YML | cut -f2 -d' ')
+        if [ ! -z "URL" ]
+        then
+            BD_URL=$URL
+            debug "process_args(): BLACKDUCK_URL identified from $YML file"
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.snippet.matching:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.snippet.matching option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.upload.source.mode:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.upload.source.mode option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.copyright.search:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.copyright.search option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.license.search:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.license.search option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.binary.scan.' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.* identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.source.path:' $YML| cut -f2 -d' ' | sed -e 's/"//g' -e "s/'//g")
+        if [ ! -z "$RES" ] && [ -d "$RES" ]
+        then
+            debug "process_args(): detect.source.path '$RES' identified from $YML"
+            SCANLOC=$(cd "$RES"; pwd)
+        fi
+    fi
     if [ $UNSUPPORTED -eq 1 ]
     then
         error "Unsupported Detect options specified (Snippet or Binary)"
-    fi
-    DETARGS="$DETARGS '$prevarg'"
-    if [ ! -z "$YML" ]
-    then
-        API=$(grep '^blackduck.api.token' $YML)
-        if [ ! -z "API" ]
-        then
-            API_TOKEN=$(echo $API | cut -c2 -d' ')
-            debug "process_args(): BLACKDUCK_API_TOKEN identified from $YML file"
-        fi
-        URL=$(grep '^blackduck.url' $YML)
-        if [ ! -z "URL" ]
-        then
-            BD_URL=$(echo $URL | cut -c2 -d' ')
-            debug "process_args(): BLACKDUCK_URL identified from $YML file"
-        fi
     fi
 }
 
