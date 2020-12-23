@@ -12,14 +12,15 @@
 # 7. If post-action or report required:
 #       - Waits for server-side scan and BOM completion
 #       - Runs Detect to perform post-action with no rescan
-# 8. If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)#
+# 8. If --report or --markdown specified, produce summary reports (--markdown writes the file blackduck.md in MD format)
 # 
 # Arguments:
 #  --quiet         - Hide Synopsys Detect standard output and other non-essential script notifications.
 #  --report        - Use to extract summary values after the scan completions including number of policy violations and counts of component vulnerability, license and operational risks identified.
 #  --markdown      - Write a project summary report to the blackduck.md file created in the project folder.
 #  --reset         - Force a scan irrespective of the previous scan data/time and then update the scan data.
-#  --testxml       - Produce output blackduck.xml file containing test results in Junit format.
+#  --testxml       - Produce output vulns.xml and policies.xml files containing test results in Junit format.
+#  --curlopts      - Add an option to curl (usually -k) to support insecure connections to a BD server without authorised certificate (alternatively set CURLOPTS env var)
 #  --detectscript=mydetect.sh
 #                  - Use a local specified copy of the detect.sh script as opposed to downloading dynamically from https://detect.synopsys.com/detect.sh.
 #  --sigtime=XXXX  - Specify the time (in seconds) used to determine whether a Signature scan should be uploaded (default 86400 = 24 hours).#   Same as detect.sh
@@ -29,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.8-Beta"
+output "Starting Detect Rescan wrapper v1.12"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -99,28 +100,28 @@ msg() {
 }
 
 install_jq() {
-#     JQPATH=$(mktemp -d)
-#     PLATFORM=$(uname -a 2>/dev/null| cut -f1 -d' ')
-#     debug "install_jq(): PLATFORM = $PLATFORM"
-#     if [ "$PLATFORM" == "Linux" ]
-#     then
-#         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-#     elif [ "$PLATFORM" == "Darwin" ]
-#     then
-#         JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-osx-amd64
-#     else
-#         return 1
-#     fi
-#     curl -s -L $JQURL -o $JQPATH/jq >/dev/null 2>&1
-#     if [ $? -ne 0 ] || [ ! -r $JQPATH/jq ]
-#     then
-#         return 1
-#     fi
-#     chmod +x $JQPATH/jq
-#     echo $JQPATH/jq
-#     debug "install_jq(): jq downloaded from $JQURL and installed to $JQPATH/jq"
-#     JQTEMPDIR=$JQPATH
-    return 1
+    JQPATH=$(mktemp -d)
+    PLATFORM=$(uname -a 2>/dev/null| cut -f1 -d' ')
+    debug "install_jq(): PLATFORM = $PLATFORM"
+    if [ "$PLATFORM" == "Linux" ]
+    then
+        JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+    elif [ "$PLATFORM" == "Darwin" ]
+    then
+        JQURL=https://github.com/stedolan/jq/releases/download/jq-1.6/jq-osx-amd64
+    else
+        return 1
+    fi
+    curl -s -L $JQURL -o $JQPATH/jq >/dev/null 2>&1
+    if [ $? -ne 0 ] || [ ! -r $JQPATH/jq ]
+    then
+        return 1
+    fi
+    chmod +x $JQPATH/jq
+    echo $JQPATH/jq
+    debug "install_jq(): jq downloaded from $JQURL and installed to $JQPATH/jq"
+    JQTEMPDIR=$JQPATH
+    return 0
 }
 
 prereqs() {
@@ -152,6 +153,7 @@ prereqs() {
 }
 
 process_args() {
+    local UNSUPPORTED=0
     local prevarg=
     DETARGS=
     for arg in $*
@@ -173,12 +175,32 @@ process_args() {
         elif [[ $arg == --detect.project.name=* ]]
         then
             DETECT_PROJECT=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.snippet.matching=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.snippet.matching option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.upload.source.mode=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.upload.source.mode option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.copyright.search=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.copyright.search option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.blackduck.signature.scanner.license.search=* ]]
+        then
+            debug "process_args(): --detect.blackduck.signature.scanner.license.search option identified"
+            UNSUPPORTED=1
+        elif [[ $arg == --detect.binary.scan.* ]]
+        then
+            debug "process_args(): --detect.binary.scan.* identified"
+            UNSUPPORTED=1
         elif [[ $arg == --detect.project.version.name=* ]]
         then
             DETECT_VERSION=1
         elif [[ $arg == --spring.profiles.active=* ]]
         then
-            YML="application-$(echo $arg | cut -f2 -d=).yml"
+            local YML="application-$(echo $arg | cut -f2 -d=).yml"
             if [ ! -r $YML ]
             then
                 YML=
@@ -230,6 +252,9 @@ process_args() {
         then
             SIGTIME=$(echo $arg | cut -f2 -d=)
             debug "process_args(): SIGTIME set to $SIGTIME"
+        elif [[ $arg == --curlopts=* ]]
+        then
+            CURLOPTS=$(echo $arg | cut -f2 -d=)
         elif [[ $arg == --* ]]
         then
             if [ ! -z "$prevarg" ]
@@ -254,26 +279,107 @@ process_args() {
     debug "process_args(): SCANLOC set to $SCANLOC"
 
     DETARGS="$DETARGS '$prevarg'"
+    #
+    # Check Environment variables
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_SNIPPET_MATCHING" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.snippet.matching option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_UPLOAD_SOURCE_MODE" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.upload.source.mode option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_COPYRIGHT_SEARCH" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.copyright.search option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_LICENSE_SEARCH" == "true" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.license.search option identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_BINARY_SCAN_FILE_PATH" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.file.path identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_BINARY_SCAN_FILE_NAME_PATTERNS" ]
+    then
+        debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.file.name.patterns identified from environment variable"
+        UNSUPPORTED=1
+    fi
+    if [ ! -z "$DETECT_SOURCE_PATH" ] && [ -d "$DETECT_SOURCE_PATH" ]
+    then
+        debug "process_args(): detect.source.path '$DETECT_SOURCE_PATH' identified from environment variable"
+        SCANLOC=$(cd "$DETECT_SOURCE_PATH"; pwd)
+    fi
+
+    #
+    # Check YML properties file
     if [ ! -z "$YML" ]
     then
-        API=$(grep '^blackduck.api.token' $YML)
+        debug "process_args(): YML file $YML identified"
+        local API=$(grep '^blackduck.api.token:' $YML| cut -f2 -d' ')
         if [ ! -z "API" ]
         then
-            API_TOKEN=$(echo $API | cut -c2 -d' ')
+            API_TOKEN=$API
             debug "process_args(): BLACKDUCK_API_TOKEN identified from $YML file"
         fi
-        URL=$(grep '^blackduck.url' $YML)
+        local URL=$(grep '^blackduck.url:' $YML | cut -f2 -d' ')
         if [ ! -z "URL" ]
         then
-            BD_URL=$(echo $URL | cut -c2 -d' ')
+            BD_URL=$URL
             debug "process_args(): BLACKDUCK_URL identified from $YML file"
         fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.snippet.matching:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.snippet.matching option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.upload.source.mode:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.upload.source.mode option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.copyright.search:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.copyright.search option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.blackduck.signature.scanner.license.search:' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.blackduck.signature.scanner.license.search option identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.binary.scan.' $YML| cut -f2 -d' ')
+        if [ "$RES" == "true" ]
+        then
+            debug "process_args(): UNSUPPORTED OPTION detect.binary.scan.* identified from $YML"
+            UNSUPPORTED=1
+        fi
+        local RES=$(grep '^detect.source.path:' $YML| cut -f2 -d' ' | sed -e 's/"//g' -e "s/'//g")
+        if [ ! -z "$RES" ] && [ -d "$RES" ]
+        then
+            debug "process_args(): detect.source.path '$RES' identified from $YML"
+            SCANLOC=$(cd "$RES"; pwd)
+        fi
+    fi
+    if [ $UNSUPPORTED -eq 1 ]
+    then
+        error "Unsupported Detect options specified (Snippet or Binary)"
     fi
 }
 
 get_token() {
     rm -f $TEMPFILE
-    curl -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
+    curl $CURLOPTS -s -X POST --header "Authorization: token ${API_TOKEN}" --header "Accept:application/json" ${BD_URL}/api/tokens/authenticate >$TEMPFILE 2>/dev/null
     if [ $? -ne 0 ] || [ ! -r "$TEMPFILE" ]
     then
         error "Cannot obtain auth token from BD Server"
@@ -291,7 +397,7 @@ get_token() {
 run_detect_offline() {
     if [ -z "$DETECT_SCRIPT" ]
     then
-        curl -s -L https://detect.synopsys.com/detect.sh > $DETECT_TMP 2>/dev/null
+        curl $CURLOPTS -s -L https://detect.synopsys.com/detect.sh > $DETECT_TMP 2>/dev/null
         if [ ! -r $DETECT_TMP ]
         then
             error "Unable to download detect.sh from https://detect.synopsys.com - use --detect=PATH_TO_DETECT.sh"
@@ -427,7 +533,7 @@ upload_boms() {
     for index in ${UNMATCHED_BOMS[@]}
     do
         echo -n '.'
-        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+        curl $CURLOPTS -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/vnd.blackducksoftware.bdio+json' \
         -H 'cache-control: no-cache' \
@@ -480,7 +586,7 @@ api_call() {
         HEADER="$2"
     fi
     rm -f $TEMPFILE
-    curl -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
+    curl $CURLOPTS -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
     RET=$?
     if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
     then
@@ -508,7 +614,7 @@ api_call() {
             return 1
         fi
     fi
-    debug "api_call(): $COUNT records identified in API response"
+    #debug "api_call(): $COUNT records identified in API response"
 
     return 0
 }
@@ -660,12 +766,13 @@ wait_for_bom_completion() {
 }
 
 wait_for_scans() {
+    local SCANURL=$(echo ${1//\"}| sed -e 's/ /%20/g')
     local loop=0
     while [ $loop -lt 80 ]
     do
         # Check scan status
         debug "wait_for_scans(): Waiting loop $loop"
-        api_call "${1//\"}/codelocations" 'application/vnd.blackducksoftware.internal-1+json'
+        api_call "${SCANURL}" 'application/vnd.blackducksoftware.scan-4+json'
         if [ $? -ne 0 ]
         then
             debug "wait_for_scans(): api_call() returned failure"
@@ -758,31 +865,42 @@ proc_sigscan() {
     then
         debug "proc_sigscan(): $SIGFOLDER/data does not exist"
         cd "$CWD"
-        return 1
+        return 0 #No Sig scan
     fi
     cd data
     for sig in *.json
     do
         if [ ! -r "$sig" ]
         then
+            debug "proc_sigscan(): No sig scan found" 
             cd "$CWD"
-            return 1
+            return 1 # No sig scan
         fi
         debug "proc_sigscan(): Processing sig scan file $SIGFOLDER/data/$sig"
-        output "Signature Scan - Uploading ..."
-        curl -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
+#        output "Signature Scan - Uploading ..."
+        curl $CURLOPTS -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
         -H 'cache-control: no-cache' \
         --data-binary "@$sig" >/dev/null 2>&1
-        RET=$?
-        debug "proc_sigscan(): Returning value $RET"
+        if [ $? -eq 0 ]
+        then
+            local SIGSCANNAME=$($JQ '.name' "$sig")
+            if [ ! -z "$SIGSCANNAME" ]
+            then
+                echo $SIGSCANNAME
+                debug "proc_sigscan(): Signature code location name = $SIGSCANNAME"
+                cd "$CWD"
+                return 0
+            fi
+        fi
+        debug "proc_sigscan(): Returning error as no code location name found in sigscan file"
         cd "$CWD"
-        return $RET
+        return 1 # Unable to upload sig scan
     done
     cd "$CWD"
-        debug "proc_sigscan(): Returning value 1"
-    return 1
+    debug "proc_sigscan(): No sig scan found"
+    return 0 # No sig scan
 }
 
 cleanup() {
@@ -837,7 +955,7 @@ run_report() {
         echo "Project: '$PROJECT' Version: '$VERSION'"
         echo
     fi
-    POL_STATUS=$($JQ -r '.overallStatus' $TEMPFILE 2>/dev/null)
+    local POL_STATUS=$($JQ -r '.overallStatus' $TEMPFILE 2>/dev/null)
     if [ "$POL_STATUS" == "IN_VIOLATION" ]
     then
         POL_TYPES=$($JQ -r '.componentVersionStatusCounts[].name' $TEMPFILE 2>/dev/null | tr '\n' ',')
@@ -853,42 +971,46 @@ run_report() {
         then
             echo Component Policy Status:
         fi
-        IFS=,
-        INDEX=1
+        local IFS=,
+        local INDEX=1
+        local COMPCOUNT=0
         for type in ${POL_TYPES}
         do
             IFS=
+            POL_STAT=$(echo $POL_STATS | cut -f$INDEX -d,)
+            COMPCOUNT=$(($COMPCOUNT+$POL_STAT))
             if [ $MODE_MARKDOWN -eq 1 ]
             then
                 if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
                 then
-                    echo "| In Violation Overidden | [$(echo $POL_STATS | cut -f$INDEX -d,)]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
+                    echo "| In Violation Overidden | [$POL_STAT]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
                 elif [ "$type" == "NOT_IN_VIOLATION" ]
                 then
-                    echo "| Not In Violation | $(echo $POL_STATS | cut -f$INDEX -d,) |" >>$MARKDOWNFILE
+                    echo "| Not In Violation | $POL_STAT |" >>$MARKDOWNFILE
                 elif [ "$type" == "IN_VIOLATION" ]
                 then
-                    echo "| In Violation | [$(echo $POL_STATS | cut -f$INDEX -d,)]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
+                    echo "| In Violation | [$POL_STAT]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
                 fi
             fi
             if [ $MODE_REPORT -eq 1 ]
             then
                 if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
                 then
-                    echo "  - In Violation Overidden:	$(echo $POL_STATS | cut -f$INDEX -d,)"
+                    echo "  - In Violation Overidden:	$POL_STAT"
                 elif [ "$type" == "NOT_IN_VIOLATION" ]
                 then
-                    echo "  - Not In Violation:		$(echo $POL_STATS | cut -f$INDEX -d,)"
+                    echo "  - Not In Violation:		$POL_STAT"
                 elif [ "$type" == "IN_VIOLATION" ]
                 then
-                    echo "  - In Violation:		$(echo $POL_STATS | cut -f$INDEX -d,)"
+                    echo "  - In Violation:		$POL_STAT"
                 fi
             fi
             ((INDEX++))
         done
     fi
     
-    XMLFILE='blackduck.xml'
+    XMLPOL='policies.xml'
+    XMLVULN='vulns.xml'
     if [ "$POL_STATUS" == "IN_VIOLATION" ] || [ $MODE_TESTXML -eq 1 ]
     then
         if [ $MODE_REPORT -eq 1 ]
@@ -901,7 +1023,7 @@ run_report() {
             ( echo '<?xml version="1.0" encoding="UTF-8"?>'
             echo '<testsuites disabled="" errors="" failures="" tests="" time="" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="junit.xsd">'
             echo '<testsuite disabled="" errors="" failures="" hostname="" id="" name="Black Duck policy status" package="" skipped="" tests="" time="" timestamp="">'
-            echo '<properties><property name="" value=""/></properties>' ) >$XMLFILE
+            echo '<properties><property name="" value=""/></properties>' ) >$XMLPOL
         fi
 
         api_call "${URL}/components?limit=5000" 'application/vnd.blackducksoftware.bill-of-materials-4+json'
@@ -918,9 +1040,9 @@ run_report() {
         local INDEX=1
         while read comp
         do
-            COMPPOL=$(echo $COMPPOLS | cut -f$INDEX -d,)
-            COMPURL=$(echo $COMPURLS | cut -f$INDEX -d,)
-            COMPNAME="$comp/$(echo $COMPVERS|cut -f$INDEX -d'|')"
+            local COMPPOL=$(echo $COMPPOLS | cut -f$INDEX -d,)
+            local COMPURL=$(echo $COMPURLS | cut -f$INDEX -d,)
+            local COMPNAME="$comp/$(echo $COMPVERS|cut -f$INDEX -d'|')"
             if [ "$COMPPOL" == "IN_VIOLATION" ]
             then
                 if [ $MODE_REPORT -eq 1 ]
@@ -929,8 +1051,8 @@ run_report() {
                 fi
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'>" >>$XMLFILE
-                    echo -n "<error message='$COMPNAME violates the following policies: " >>$XMLFILE
+                    echo "<testcase name='$COMPNAME'>" >>$XMLPOL
+                    echo -n "<error message='$COMPNAME violates the following policies: " >>$XMLPOL
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -938,8 +1060,8 @@ run_report() {
                     continue
                 fi
             
-                POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | sed -e "s/'/\"/g" )
-                POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | sed -e "s/'/\"/g" )
+                local POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | sed -e "s/'/\"/g" )
+                local POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | sed -e "s/'/\"/g" )
                 IFS='|'
                 sevind=1
                 for polname in $POLNAMES
@@ -950,13 +1072,13 @@ run_report() {
                     fi
                     if [ $MODE_TESTXML -eq 1 ]
                     then
-                        echo -n "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)), " >>$XMLFILE
+                        echo -n "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)), " >>$XMLPOL
                     fi
                     ((sevind++))
                 done
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "'></error></testcase>" >>$XMLFILE
+                    echo "'></error></testcase>" >>$XMLPOL
                 fi
                 if [ $MODE_REPORT -eq 1 ]
                 then
@@ -966,7 +1088,7 @@ run_report() {
             else
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'></testcase>" >>$XMLFILE
+                    echo "<testcase name='$COMPNAME'></testcase>" >>$XMLPOL
                 fi
             fi
             ((INDEX++))
@@ -975,7 +1097,7 @@ run_report() {
         then
             ( echo '<system-out>system-out</system-out>'
             echo '    <system-err>system-err</system-err></testsuite>'
-            echo '</testsuites>' ) >>$XMLFILE
+            echo '</testsuites>' ) >>$XMLPOL
         fi
     else
         if [ $MODE_REPORT -eq 1 ]
@@ -990,47 +1112,91 @@ run_report() {
         fi
     fi
 
-
     api_call ${URL}/risk-profile
     if [ $? -ne 0 ]
     then
         return 1
     fi
 
-    VULNS=$($JQ -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE 2>/dev/null)
-    LICS=$($JQ -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE 2>/dev/null)
-    OPS=$($JQ -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE 2>/dev/null)
+    local VULNS=$($JQ -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE 2>/dev/null)
+    local LICS=$($JQ -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE 2>/dev/null)
+    local OPS=$($JQ -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE 2>/dev/null)
     if [ $MODE_MARKDOWN -eq 1 ]
     then
-        NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Alow);!')
-        NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Alow);!')
-        NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Amedium);\[!' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Alow);!')
+        local NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!')
+        local NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!')
+        local NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!')
 
         ( echo
-        echo "## Component Risk"
+        echo "## Component Counts"
         echo "| CATEGORY | CRIT | HIGH | MED | LOW | None |"
         echo "|----------|------:|-------:|------:|------:|-------:|"
-        echo "| Vulnerabilities | ${NEWVULNS//;/ | } |"
-        echo "| Licenses | - | ${NEWLICS//;/ | } |"
+        echo "| Vulnerability | ${NEWVULNS//;/ | } |"
+        echo "| License | - | ${NEWLICS//;/ | } |"
         echo "| Op Risk | - | ${NEWOPS//;/ | } |"
         echo )>>$MARKDOWNFILE
     fi
+    if [ $MODE_REPORT -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
+    then
+        api_call "${URL}/vulnerable-bom-components?limit=5000&sort=severity" 'application/vnd.blackducksoftware.bill-of-materials-6+json'
+        if [ $? -ne 0 ]
+        then
+            debug "run_report(): API error trying to get vulnerable components"
+            return 1
+        fi
+    fi
     if [ $MODE_REPORT -eq 1 ]
     then
-        (echo
-        echo "Component Risk:			CRIT	HIGH	MED 	LOW 	None"
-        echo "				----	----	--- 	--- 	----"
-        echo "	Vulnerabilities,,${VULNS}"
-        echo "	Licenses,,-,${LICS}"
-        echo "	Op Risk,,,-,${OPS}"
-        echo ) | sed -e 's/,/	/g' 
-    
+        local VULN_LIST=$($JQ -r '.items[] | select(.vulnerabilityWithRemediation.severity == "CRITICAL" or .vulnerabilityWithRemediation.severity == "HIGH") | [.vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.cweId, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @csv' $TEMPFILE 2>/dev/null | sed -e 's/"//g' -e 's/,,/, ,/g' | sort -t , -n -k 3 -r)
+        echo
+        echo "Component Counts (Total = $COMPCOUNT):"
+        ( echo " ,CRIT,HIGH,MED ,LOW ,None"
+        echo " ,----,----,---,---,----"
+        echo "Vulnerability,${VULNS}"
+        echo "License,-,${LICS}"
+        echo "Op Risk,-,${OPS}"
+        echo ) | column -t -s ',' | sed -e 's/^/	/g'
+
+        echo
+        echo "Critical/High Vulnerabilities:"
+        (echo "Vuln ID,Score,Severity,Weakness,Status,Component,Component Version"
+        echo $VULN_LIST )| column -t -s ',' | sed -e 's/^/	/g'
+        echo 
         echo "See Black Duck Project at:"
         echo "$URL/components"
-        echo 
+        echo
         echo "----------------------------------------------------------------------"
     fi
+    if [ $MODE_TESTXML -eq 1 ]
+    then
+        ( echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo '<testsuites disabled="" errors="" failures="" tests="" time="" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="junit.xsd">'
+        echo '<testsuite disabled="" errors="" failures="" hostname="" id="" name="Black Duck vulnerability status" package="" skipped="" tests="" time="" timestamp="">'
+        echo '<properties><property name="" value=""/></properties>' ) >$XMLVULN
+        rm -f $TEMPFILE2
+        $JQ -r '.items[] | [.vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @csv' $TEMPFILE | sed -e 's/"//g' | sort -t , -n -k 3 -r > $TEMPFILE2 2>/dev/null
+        while read line
+        do
+            local VULNNAME=$(echo $line | cut -f1 -d,)
+            local VULNSEV=$(echo $line | cut -f2 -d,)
+            local VULNSCORE=$(echo $line | cut -f3 -d,)
+            local VULNSTAT=$(echo $line | cut -f4 -d,)
+            local VULNCOMP=$(echo $line | cut -f5 -d,)
+            local VULNCOMPVER=$(echo $line | cut -f6 -d,)
 
+            (echo "<testcase name='$VULNSEV - $VULNNAME'><error message='Vulnerability $VULNNAME:"
+            echo "- Severity = $VULNSEV"
+            echo "- Score = $VULNSCORE"
+            echo "- Status = $VULNSTAT"
+            echo "- Component = $VULNCOMP/$VULNCOMPVER"
+            echo "See ${BD_URL}/api/vulnerabilities/$VULNNAME/overview"
+            echo "'></error></testcase>" ) >>$XMLVULN
+        done < $TEMPFILE2
+
+        ( echo '<system-out>system-out</system-out>'
+        echo '    <system-err>system-err</system-err></testsuite>'
+        echo '</testsuites>' ) >>$XMLVULN
+   fi
 }
 
 get_prev_scandata() {
@@ -1117,7 +1283,7 @@ update_prevscandata() {
         #echo "update_prevscandata: VAL=$VAL" >&2
         #echo "update_prevscandata: URL=$URL" >&2 
         #echo "update_prevscandata: curl -X PUT --header \"Authorization: Bearer $TOKEN\" --header \"Content-Type: application/vnd.blackducksoftware.project-detail-5+json\" -d '$VAL' $URL"
-        curl -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
+        curl $CURLOPTS -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
         if [ $? -ne 0 ]
         then
             error "Unable to write scan data to Project Version custom field"
@@ -1247,14 +1413,20 @@ msg "Checking for signature scan ..."
 SIGDATE=$(check_sigscan $SIGTIME)
 if [ $? -eq 1 ]
 then
-    proc_sigscan
+    CLNAME=$(proc_sigscan | sed -e 's/ /%20/g' -e 's/"//g')
     if [ $? -ne 0 ]
     then
-        error "Unable to upload sig scan json"
+        msg "Unable to upload sig scan json"
+    elif [ -z "$CLNAME" ]
+    then
+        debug "No sig scan found"
+    else
+        output "Signature Scan Uploaded"
+        debug "Processed code location name = '$CLNAME'"
+        UPDATE_PREVSCANDATA=1
     fi
-    UPDATE_PREVSCANDATA=1
 else
-    output "Not uploading Signature scan as time since last scan not exceeded"
+    output "Not processing Signature scan as time since last scan not exceeded"
 fi
 
 if [ $UPDATE_PREVSCANDATA -eq 1 -a -z "$VERURL" -a $MODE_PREVFILE -eq 0 ] || [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ] 
@@ -1272,10 +1444,20 @@ RETURN=0
 if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ]
 then
     echo -n "detect_rescan: Waiting for BOM completion: ..."
-    wait_for_scans $VERURL
+    if [ ! -z "$CLNAME" ]
+    then
+        debug "Waiting for sig scan code location scan ..."
+        wait_for_scans "${BD_URL}/api/codelocations?q=name:${CLNAME}"
+        if [ $? -ne 0 ]
+        then
+            error "wait_for_scans() for sig scan returned error"
+        fi
+    fi
+    debug "Waiting for version scans ..."
+    wait_for_scans "${VERURL//\"}/codelocations"
     if [ $? -ne 0 ]
     then
-        error "wait_for_scans() returned error"
+        error "wait_for_scans() for version returned error"
     fi
     wait_for_bom_completion $VERURL
     if [ $? -ne 0 ]
@@ -1300,7 +1482,7 @@ then
     update_prevscandata $SIGDATE $SCANFIELDURL
 fi
 
-if [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ]
+if [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
 then
     run_report $VERURL
 fi
