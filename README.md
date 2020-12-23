@@ -1,4 +1,4 @@
-# detect_rescan.sh - v1.11-Dev
+# detect_rescan.sh - v1.12-Dev
 Bash script to wrapper Synopsys Detect for Black Duck scanning to reduce duplicate scan uploads between runs for use in frequent automated scan processes and optionally produce immediate project security summary reports.
 
 # INTRODUCTION
@@ -13,7 +13,7 @@ The script is intended to address issues caused by frequently calling the Black 
 
 It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
 
-- Processes supplied Synpsys Detect options to determine if a post-action is required
+- Processes supplied Synpsys Detect options to determine if a post-action is required (also looks at environment variables and options in a .yml if specified)
 - Downloads and runs Detect (detect.sh) offline with supplied options to perform a scan
 - Identifies the BOM and Signature scan files from offline run (note the script should only be used for projects where 1 signature scan has been mapped)
 - Looks for previous scan data (see below for location of this data) 
