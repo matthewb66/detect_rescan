@@ -44,6 +44,8 @@ It is used as a wrapper for the standard Synopsys Detect bash script on Linux or
 
 * Detect_rescan does not support Snippet or Binary scan types (Dependency and Signature scans are supported).
 
+* BOM Aggregation (using --detect.bom.aggregate.name in Detect) is not recommended (although should be supported) as it will cause separate BOMs to be aggregated which will reduce the ability of the script to determine changes within sub-projects.
+
 # CUSTOM FIELD CREATION
 
 The default script operation is to store scan data in a custom field within Project Versions (unless the `--file` option is specified which will cause the scan data to be stored in the `.bdprevscan` file in the project folder).
