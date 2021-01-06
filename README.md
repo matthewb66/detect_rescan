@@ -11,6 +11,8 @@ It does not represent any extension of licensed functionality of Synopsys softwa
 
 The script is intended to address issues caused by frequently calling the Black Duck Detect scanner within a CI/CD pipleine or automated build environment which can result in repeated scans being submitted and performance issues on the Black Duck server. It can also produce console and other optional outputs of project status after analysis.
 
+Detect Rescan is not intended to replace Synopsys Detect, which should continue to be used for standard Black Duck scanning, except specific use-cases where it can be useful including within Developer pipelines within CI, or where the reporting features are useful.
+
 It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
 
 - Processes supplied Synpsys Detect options to determine if a post-action is required (also looks at environment variables and options in a .yml if specified)
