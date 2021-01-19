@@ -13,7 +13,7 @@ The script is intended to address issues caused by frequently calling the Black 
 
 Detect Rescan is not intended to replace [Synopsys Detect](https://detect.synopsys.com/doc), which should continue to be used for standard Black Duck scanning, except specific use-cases where it can be useful including within Developer pipelines within CI, or where the reporting features are useful.
 
-It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS, and does the following:
+It is used as a wrapper for the standard Synopsys Detect bash script on Linux or MacOS (or in Windows using a Bash sub-system), and does the following:
 
 - Processes supplied Synpsys Detect options to determine if a post-action is required (also looks at environment variables and options in a .yml if specified)
 - Downloads and runs Detect (detect.sh) offline with supplied options to perform a scan
