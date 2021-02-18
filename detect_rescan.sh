@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.12-Dev"
+output "Starting Detect Rescan wrapper v1.13"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -99,6 +99,24 @@ msg() {
     fi
 }
 
+encode_url() {
+    if [ ! -z "$1" ]
+    then
+        echo ${*} | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g' -e 's/{/%7B/g' -e 's/}/%7D/g' -e 's/(/%28/g' -e 's/)/%29/g' -e 's/"//g'
+    else
+        cat - | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g' -e 's/{/%7B/g' -e 's/}/%7D/g' -e 's/(/%28/g' -e 's/)/%29/g' -e 's/\"//g'
+    fi
+}
+
+escape_string() {
+    if [ ! -z "$1" ]
+    then
+        echo ${*} | sed -e 's/ /\\ /g' -e 's/"//g'
+    else
+        cat - | sed -e 's/ /\\ /g' -e 's/"//g'
+    fi
+}
+
 install_jq() {
     JQPATH=$(mktemp -d)
     PLATFORM=$(uname -a 2>/dev/null| cut -f1 -d' ')
@@ -158,6 +176,7 @@ process_args() {
     DETARGS=
     for arg in $*
     do
+        debug "process_args(): Processing argument '$arg'"
         if [[ $arg == --blackduck.offline.mode=* ]]
         then
             continue
@@ -259,7 +278,8 @@ process_args() {
         then
             if [ ! -z "$prevarg" ]
             then
-                DETARGS="$DETARGS '$prevarg'"
+                NEWARG="$(echo $prevarg | cut -f1 -d=)='$(echo $prevarg | cut -f2 -d=)'"
+                DETARGS="$DETARGS $NEWARG"
             fi
             prevarg=$arg
         else
@@ -278,7 +298,10 @@ process_args() {
     fi
     debug "process_args(): SCANLOC set to $SCANLOC"
 
-    DETARGS="$DETARGS '$prevarg'"
+    NEWARG="$(echo $prevarg | cut -f1 -d=)='$(echo $prevarg | cut -f2 -d=)'"
+    DETARGS="$DETARGS $NEWARG"
+    
+    debug "process_args(): DETARGS is $DETARGS"
     #
     # Check Environment variables
     if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_SNIPPET_MATCHING" == "true" ]
@@ -623,23 +646,29 @@ get_project() {
     #Get  projects $1=projectname
     debug "get_project(): ARG1=$1"
     #local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
-    local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g' )
+    local SEARCHPROJ=$(encode_url ${1})
     local MYURL="${BD_URL}/api/projects?q=name:${SEARCHPROJ}"
     debug "get_project(): API_URL=$MYURL"
 
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -ne 0 ]
     then
+        debug "get_project(): API error - returning early"
         return 1
     fi
 
-    local PROJNAMES=$($JQ -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g'  -e 's/\[/%5B/g' -e 's/\]/%5D/g')
-    local PROJURLS=$($JQ -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/\"//g')
+    local PROJNAMES=$($JQ -r '[.items[].name]|@csv' $TEMPFILE 2>/dev/null| encode_url )
+    local PROJURLS=$($JQ -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null| sed -e 's/\"//g' )
+    debug "get_project(): PROJNAMES=$PROJNAMES"
+    debug "get_project(): PROJURLS=$PROJURLS"
+
     local PROJNUM=1
     local FOUNDNUM=0
     local IFS=,
     for PROJ in $PROJNAMES
     do
+        debug "get_project(): PROJ='$PROJ' SEARCHPROJ='$SEARCHPROJ'"
+
         if [ "$PROJ" == "$SEARCHPROJ" ]
         then
             FOUNDNUM=$PROJNUM
@@ -649,11 +678,13 @@ get_project() {
     done
     IFS=
 
+    debug "get_project(): Found $FOUNDNUM projects"
     if [ $FOUNDNUM -eq 0 ]
     then
         return 0
     fi
 
+    debug "get_project(): PROJURLS is '$PROJURLS'"
     RETURL=$(echo $PROJURLS | cut -f $FOUNDNUM -d ,)
     debug "get_project(): returning project URL $RETURL"
     echo $RETURL
@@ -662,18 +693,22 @@ get_project() {
 
 get_version() {
     # Get Version  - $1 = PROJURL
-    local VERNAME=$(echo $2 | sed -e 's:/:%2F:g' -e 's/ /%20/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g')
+    local VERNAME=$(encode_url ${2} )
     local API_URL="${1//\"}/versions?versionName%3A${VERNAME}"
+    debug "get_version(): version URL is '$API_URL'"
     #local SEARCHVERSION="${2// /_}"
     #echo "get_version: SEARCHVERSION=$SEARCHVERSION" >&2
     api_call "${API_URL}" 'application/vnd.blackducksoftware.project-detail-4+json'
     if [ $? -ne 0 ]
     then
+        debug "get_version(): API error"
         return 1
     fi
 
-    local VERNAMES=$($JQ -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/ /%20/g' -e 's/\"//g' -e 's:/:%2F:g'  -e 's/\[/%5B/g' -e 's/\]/%5D/g')
-    local VERURLS=$($JQ -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g')
+    local VERNAMES=$($JQ -r '[.items[].versionName]|@csv' $TEMPFILE 2>/dev/null | encode_url )
+    local VERURLS=$($JQ -r '[.items[]._meta.href]|@csv' $TEMPFILE 2>/dev/null | sed -e 's/\"//g' )
+    debug "get_version(): VERNAMES=$VERNAMES"
+    debug "get_version(): VERURLS=$VERURLS"
     local VERNUM=1
     local FOUNDVERNUM=0
     local IFS=,
@@ -691,6 +726,7 @@ get_version() {
     
     if [ $FOUNDVERNUM -eq 0 ]
     then
+        debug "get_version(): 0 versions found from project"
         return 0
     fi
 
@@ -1060,8 +1096,8 @@ run_report() {
                     continue
                 fi
             
-                local POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | sed -e "s/'/\"/g" )
-                local POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | sed -e "s/'/\"/g" )
+                local POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | escape_string )
+                local POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | escape_string )
                 IFS='|'
                 sevind=1
                 for polname in $POLNAMES
@@ -1413,7 +1449,7 @@ msg "Checking for signature scan ..."
 SIGDATE=$(check_sigscan $SIGTIME)
 if [ $? -eq 1 ]
 then
-    CLNAME=$(proc_sigscan | sed -e 's/ /%20/g' -e 's/"//g')
+    CLNAME=$(proc_sigscan | escape_string)
     if [ $? -ne 0 ]
     then
         msg "Unable to upload sig scan json"
