@@ -30,14 +30,24 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13"
+output "Starting Detect Rescan wrapper v1.13b"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 TEMPFILE2=$(mktemp -u)
 LOGFILE=$(mktemp -u)
 
-ACTION_ARGS=( "--blackduck.timeout" "--detect.force.success" "--detect.notices.report" "--detect.policy.check.fail.on.severities" "--detect.risk.report.pdf" "--detect.wait.for.results" )
+ACTION_ARGS='--blackduck.timeout=*|\
+--detect.force.success=*|\
+--detect.notices.report=*|\
+--detect.policy.check.fail.on.severities=*|\
+--detect.risk.report.pdf=*|--detect.wait.for.results=*'
+UNSUPPORTED_ARGS='--detect.blackduck.signature.scanner.snippet.matching=*|\
+--detect.blackduck.signature.scanner.upload.source.mode=*|\
+--detect.blackduck.signature.scanner.copyright.search=*|\
+--detect.blackduck.signature.scanner.license.search=*|\
+--detect.binary.scan.*'
+
 API_TOKEN=$BLACKDUCK_API_TOKEN
 BD_URL=$BLACKDUCK_URL
 YML=
@@ -62,6 +72,8 @@ DETECT_SCRIPT=
 MODE_RESET=0
 JQTEMPDIR=
 JQ=
+
+UNSUPPORTED=0
 
 BOM_FILES=()
 BOM_HASHES=()
@@ -170,138 +182,7 @@ prereqs() {
     return $ret
 }
 
-process_args() {
-    local UNSUPPORTED=0
-    local prevarg=
-    DETARGS=
-    for arg in $*
-    do
-        debug "process_args(): Processing argument '$arg'"
-        if [[ $arg == --blackduck.offline.mode=* ]]
-        then
-            continue
-        elif [[ $arg == --detect.blackduck.signature.scanner.host.url=* ]]
-        then
-            continue
-        elif [[ $arg == --blackduck.api.token=* ]]
-        then
-            debug "process_args(): BLACKDUCK_API_TOKEN identified from command line option"
-            API_TOKEN=$(echo $arg | cut -f2 -d=)==
-        elif [[ $arg == --blackduck.url=* ]]
-        then
-            debug "process_args(): BLACKDUCK_URL identified from command line option"
-            BD_URL=$(echo $arg | cut -f2 -d=)
-        elif [[ $arg == --detect.project.name=* ]]
-        then
-            DETECT_PROJECT=1
-        elif [[ $arg == --detect.blackduck.signature.scanner.snippet.matching=* ]]
-        then
-            debug "process_args(): --detect.blackduck.signature.scanner.snippet.matching option identified"
-            UNSUPPORTED=1
-        elif [[ $arg == --detect.blackduck.signature.scanner.upload.source.mode=* ]]
-        then
-            debug "process_args(): --detect.blackduck.signature.scanner.upload.source.mode option identified"
-            UNSUPPORTED=1
-        elif [[ $arg == --detect.blackduck.signature.scanner.copyright.search=* ]]
-        then
-            debug "process_args(): --detect.blackduck.signature.scanner.copyright.search option identified"
-            UNSUPPORTED=1
-        elif [[ $arg == --detect.blackduck.signature.scanner.license.search=* ]]
-        then
-            debug "process_args(): --detect.blackduck.signature.scanner.license.search option identified"
-            UNSUPPORTED=1
-        elif [[ $arg == --detect.binary.scan.* ]]
-        then
-            debug "process_args(): --detect.binary.scan.* identified"
-            UNSUPPORTED=1
-        elif [[ $arg == --detect.project.version.name=* ]]
-        then
-            DETECT_VERSION=1
-        elif [[ $arg == --spring.profiles.active=* ]]
-        then
-            local YML="application-$(echo $arg | cut -f2 -d=).yml"
-            if [ ! -r $YML ]
-            then
-                YML=
-            fi
-        fi
-        for opt in ${ACTION_ARGS[@]}
-        do
-            if [[ $arg == ${opt}* ]]
-            then
-                DETECT_ACTION=1
-                msg "Detect Action identified - will rerun Detect after upload and scan completion"
-                debug "process_args(): Identified action argument $arg"
-            fi
-        done
-
-        if [ "$arg" == "--report" ]
-        then
-            debug "process_args(): MODE_REPORT set"
-            MODE_REPORT=1
-        elif [ "$arg" == "--quiet" ]
-        then
-            debug "process_args(): MODE_QUIET set"
-            MODE_QUIET=1
-        elif [ "$arg" == "--markdown" ]
-        then
-            debug "process_args(): MODE_MARKDOWN set"
-            MODE_MARKDOWN=1
-        elif [ "$arg" == "--file" ]
-        then
-            debug "process_args(): MODE_PREVFILE set"
-            MODE_PREVFILE=1
-        elif [ "$arg" == "--testxml" ]
-        then
-            debug "process_args(): MODE_TESTXML set"
-            MODE_TESTXML=1
-        elif [ "$arg" == "--reset" ]
-        then
-            debug "process_args(): MODE_RESET set"
-            MODE_RESET=1
-        elif [[ $arg == --detectscript=* ]]
-        then
-            DETECT_SCRIPT=$(echo $arg | cut -f2 -d=)
-            debug "process_args(): DETECT_SCRIPT set to $DETECT_SCRIPT"
-            if [ ! -r "$DETECT_SCRIPT" ]
-            then
-                error "Detect script $DETECT_SCRIPT does not exist"
-            fi
-        elif [[ $arg == --sigtime=* ]]
-        then
-            SIGTIME=$(echo $arg | cut -f2 -d=)
-            debug "process_args(): SIGTIME set to $SIGTIME"
-        elif [[ $arg == --curlopts=* ]]
-        then
-            CURLOPTS=$(echo $arg | cut -f2 -d=)
-        elif [[ $arg == --* ]]
-        then
-            if [ ! -z "$prevarg" ]
-            then
-                NEWARG="$(echo $prevarg | cut -f1 -d=)='$(echo $prevarg | cut -f2 -d=)'"
-                DETARGS="$DETARGS $NEWARG"
-            fi
-            prevarg=$arg
-        else
-            prevarg="$prevarg $arg"
-        fi
-        if [[ $prevarg == --detect.source.path=* ]]
-        then
-            SCANLOC=$(echo $prevarg | cut -f2 -d=)
-            SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
-        fi
-    done
-    if [[ $prevarg == --detect.source.path=* ]]
-    then
-        SCANLOC=$(echo $prevarg | cut -f2 -d=)
-        SCANLOC=$(cd "$SCANLOC"; pwd)
-    fi
-    debug "process_args(): SCANLOC set to $SCANLOC"
-
-    NEWARG="$(echo $prevarg | cut -f1 -d=)='$(echo $prevarg | cut -f2 -d=)'"
-    DETARGS="$DETARGS $NEWARG"
-    
-    debug "process_args(): DETARGS is $DETARGS"
+check_env() {
     #
     # Check Environment variables
     if [ "$DETECT_BLACKDUCK_SIGNATURE_SCANNER_SNIPPET_MATCHING" == "true" ]
@@ -1375,13 +1256,143 @@ then
     end 1
 fi
 
-process_args $*
+getargval() {
+    local ARG=$(echo "$*" | cut -f2 -d=)
+    ARG="${ARG#\'}"
+    ARG="${ARG%\'}"
+    if [ ! -z "$(echo $*|grep ' ')" ]
+    then
+        echo "'${ARG}'"
+    else
+        echo "${ARG}"
+    fi
+}
+
+procarg() {
+    local OPT=$(echo "$*" | cut -f1 -d=)
+    echo "${OPT}=$(getargval $*)"
+}
+
+# Process arguments
+while (( "$#" )); do
+    echo "processing '$1'"
+    case "$1" in
+# Ignored arguments
+        --blackduck.offline.mode=*)
+            shift; continue
+            ;;
+        --detect.blackduck.signature.scanner.host.url=*)
+            shift; continue
+            ;;
+# Arguments NOT passed to detect.sh
+        --report)
+            debug "process_args(): MODE_REPORT set"
+            MODE_REPORT=1
+            shift; continue
+            ;;
+        --quiet)
+            debug "process_args(): MODE_QUIET set"
+            MODE_QUIET=1
+            shift; continue
+            ;;
+        --markdown)
+            debug "process_args(): MODE_MARKDOWN set"
+            MODE_MARKDOWN=1
+            shift; continue
+            ;;
+        --file)
+            debug "process_args(): MODE_PREVFILE set"
+            MODE_PREVFILE=1
+            shift; continue
+            ;;
+        --testxml)
+            debug "process_args(): MODE_TESTXML set"
+            MODE_TESTXML=1
+            shift; continue
+            ;;
+        --reset)
+            debug "process_args(): MODE_RESET set"
+            MODE_RESET=1
+            shift; continue
+            ;;
+        --detectscript=*)
+            DETECT_SCRIPT=$(getarg "$1")
+            debug "process_args(): DETECT_SCRIPT set to $DETECT_SCRIPT"
+            if [ ! -r "$DETECT_SCRIPT" ]
+            then
+                error "Detect script $DETECT_SCRIPT does not exist"
+            fi
+            shift; continue
+            ;;
+        --sigtime=*)
+            SIGTIME=$(getarg "$1")
+            debug "process_args(): SIGTIME set to $SIGTIME"
+            shift; continue
+            ;;
+        --curlopts=*)
+            CURLOPTS=$(getarg "$1")
+            shift; continue
+            ;;
+# Unsupported arguments
+        $UNSUPPORTED_ARGS)
+            debug "process_args(): unsupported option"
+            UNSUPPORTED=1
+            shift; continue
+            ;;
+# Arguments passed to detect.sh
+        --blackduck.api.token=*)
+            debug "process_args(): BLACKDUCK_API_TOKEN identified from command line option"
+            API_TOKEN="$(getargval $1)=="
+            ;;
+        --blackduck.url=*)
+            debug "process_args(): BLACKDUCK_URL identified from command line option"
+            BD_URL=$(getargval "$1")
+            ;;
+        --detect.project.name=*)
+            DETECT_PROJECT=1
+            ;;
+        --detect.project.version.name=*)
+            DETECT_VERSION=1
+            ;;
+        --spring.profiles.active=*)
+            local YML="application-$(getargval $1).yml"
+            if [ ! -r $YML ]
+            then
+                YML=
+            fi
+            DETARGS="$DETARGS $(procarg $1)"
+            ;;
+        $ACTION_ARGS)
+            DETECT_ACTION=1
+            msg "Detect Action identified - will rerun Detect after upload and scan completion"
+            debug "process_args(): Identified action argument $arg"
+            DETARGS="$DETARGS $(procarg $1)"
+            ;;
+        --detect.source.path=*)
+            SCANLOC=$(getarg $1)
+            SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
+            ;;
+        --*)
+            ;;
+      esac
+      DETARGS="$DETARGS $(procarg $1)"
+      shift
+done
+
+echo "DETARGS = '$DETARGS'"
+debug "Args processed"
+
+check_env()
+
+if [ $UNSUPPORTED -eq 1 ]
+then
+    error "Unsupported Detect options specified (Snippet or Binary)"
+fi
+
 if [ -z "$API_TOKEN" -o -z "$BD_URL" ]
 then
     error "No connection data for BD Server (BLACKDUCK_URL or BLACKDUCK_API_TOKEN)"
 fi
-
-debug "Args processed"
 
 TOKEN=$(get_token)
 
