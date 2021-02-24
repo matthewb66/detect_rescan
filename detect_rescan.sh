@@ -30,14 +30,14 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13c"
+output "Starting Detect Rescan wrapper v1.13d"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 TEMPFILE2=$(mktemp -u)
 LOGFILE=$(mktemp -u)
 
-ACTION_ARGS=--blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*
+# ACTION_ARGS=--blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*
 # UNSUPPORTED_ARGS='--detect.blackduck.signature.scanner.snippet.matching=*|--detect.blackduck.signature.scanner.upload.source.mode=*|--detect.blackduck.signature.scanner.copyright.search=*|--detect.blackduck.signature.scanner.license.search=*|--detect.binary.scan.*'
 
 API_TOKEN=$BLACKDUCK_API_TOKEN
@@ -77,6 +77,12 @@ error() {
     echo "detect_rescan: ERROR: $*" >$LOGFILE
     cat $LOGFILE
     end 1
+}
+
+error2() {
+    echo "detect_rescan: ERROR: $*" >$LOGFILE
+    cat $LOGFILE
+    end 2
 }
 
 end() {
@@ -664,14 +670,15 @@ wait_for_bom_completion() {
         if [ "$STATUS" == "true" ]
         then
             debug "wait_for_bom_completion(): upToDate status returned true"
-            break
+            echo
+            return 0
         fi
         echo -n '.'
         sleep 15
         ((loop++))
     done
     echo
-    return 0
+    return 1
 }
 
 wait_for_scans() {
@@ -715,7 +722,7 @@ wait_for_scans() {
         echo -n '.'
         sleep 15
     done
-    return 0
+    return 1
 }
 
 check_sigscan() {
@@ -1371,7 +1378,7 @@ while (( "$#" )); do
       shift
 done
 
-echo "DETARGS = '$DETARGS'"
+# echo "DETARGS = '$DETARGS'"
 debug "Args processed"
 
 check_env()
@@ -1489,19 +1496,19 @@ then
         wait_for_scans "${BD_URL}/api/codelocations?q=name:${CLNAME}"
         if [ $? -ne 0 ]
         then
-            error "wait_for_scans() for sig scan returned error"
+            error2 "wait_for_scans() for sig scan returned error"
         fi
     fi
     debug "Waiting for version scans ..."
     wait_for_scans "${VERURL//\"}/codelocations"
     if [ $? -ne 0 ]
     then
-        error "wait_for_scans() for version returned error"
+        error2 "wait_for_scans() for version returned error"
     fi
     wait_for_bom_completion $VERURL
     if [ $? -ne 0 ]
     then
-        error "wait_for_bom_completion() returned error"
+        error2 "wait_for_bom_completion() returned error"
     fi
     if [ $DETECT_ACTION -eq 1 ]
     then
