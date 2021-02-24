@@ -30,23 +30,15 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13b"
+output "Starting Detect Rescan wrapper v1.13c"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 TEMPFILE2=$(mktemp -u)
 LOGFILE=$(mktemp -u)
 
-ACTION_ARGS='--blackduck.timeout=*|\
---detect.force.success=*|\
---detect.notices.report=*|\
---detect.policy.check.fail.on.severities=*|\
---detect.risk.report.pdf=*|--detect.wait.for.results=*'
-UNSUPPORTED_ARGS='--detect.blackduck.signature.scanner.snippet.matching=*|\
---detect.blackduck.signature.scanner.upload.source.mode=*|\
---detect.blackduck.signature.scanner.copyright.search=*|\
---detect.blackduck.signature.scanner.license.search=*|\
---detect.binary.scan.*'
+ACTION_ARGS=--blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*
+# UNSUPPORTED_ARGS='--detect.blackduck.signature.scanner.snippet.matching=*|--detect.blackduck.signature.scanner.upload.source.mode=*|--detect.blackduck.signature.scanner.copyright.search=*|--detect.blackduck.signature.scanner.license.search=*|--detect.binary.scan.*'
 
 API_TOKEN=$BLACKDUCK_API_TOKEN
 BD_URL=$BLACKDUCK_URL
@@ -1275,7 +1267,7 @@ procarg() {
 
 # Process arguments
 while (( "$#" )); do
-    echo "processing '$1'"
+#     echo "processing '$1'"
     case "$1" in
 # Ignored arguments
         --blackduck.offline.mode=*)
@@ -1284,7 +1276,7 @@ while (( "$#" )); do
         --detect.blackduck.signature.scanner.host.url=*)
             shift; continue
             ;;
-# Arguments NOT passed to detect.sh
+# Arguments NOT to be passed to detect.sh
         --report)
             debug "process_args(): MODE_REPORT set"
             MODE_REPORT=1
@@ -1334,12 +1326,12 @@ while (( "$#" )); do
             shift; continue
             ;;
 # Unsupported arguments
-        $UNSUPPORTED_ARGS)
+        --detect.blackduck.signature.scanner.snippet.matching=*|--detect.blackduck.signature.scanner.upload.source.mode=*|--detect.blackduck.signature.scanner.copyright.search=*|--detect.blackduck.signature.scanner.license.search=*|--detect.binary.scan.*)
             debug "process_args(): unsupported option"
             UNSUPPORTED=1
             shift; continue
             ;;
-# Arguments passed to detect.sh
+# Arguments to be passed to detect.sh
         --blackduck.api.token=*)
             debug "process_args(): BLACKDUCK_API_TOKEN identified from command line option"
             API_TOKEN="$(getargval $1)=="
@@ -1362,7 +1354,7 @@ while (( "$#" )); do
             fi
             DETARGS="$DETARGS $(procarg $1)"
             ;;
-        $ACTION_ARGS)
+        --blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*)
             DETECT_ACTION=1
             msg "Detect Action identified - will rerun Detect after upload and scan completion"
             debug "process_args(): Identified action argument $arg"
