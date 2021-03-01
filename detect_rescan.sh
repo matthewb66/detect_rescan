@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.12"
+output "Starting Detect Rescan wrapper v1.12b"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -751,7 +751,15 @@ wait_for_bom_completion() {
             return 1
         fi
         local STATUS=$($JQ -r '.upToDate' $TEMPFILE 2>/dev/null)
-
+        if [ "$STATUS" == 'null' ]
+        then
+            STATUS=$($JQ -r '.status' $TEMPFILE 2>/dev/null)
+            if [ "$STATUS" == 'UP_TO_DATE' ]
+            then
+                STATUS='true'
+            fi
+        fi
+        
         if [ "$STATUS" == "true" ]
         then
             debug "wait_for_bom_completion(): upToDate status returned true"
