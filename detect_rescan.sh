@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.12b"
+output "Starting Detect Rescan wrapper v1.12c"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -1055,12 +1055,12 @@ run_report() {
             then
                 if [ $MODE_REPORT -eq 1 ]
                 then
-                    echo -n "	Component: '$COMPNAME' Policies Violated: "
+                    echo -n "	Component: '${COMPNAME/\'}' Policies Violated: "
                 fi
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'>" >>$XMLPOL
-                    echo -n "<error message='$COMPNAME violates the following policies: " >>$XMLPOL
+                    echo "<testcase name='${COMPNAME/\'}'>" >>$XMLPOL
+                    echo -n "<error message='${COMPNAME/\'} violates the following policies: " >>$XMLPOL
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -1096,7 +1096,7 @@ run_report() {
             else
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'></testcase>" >>$XMLPOL
+                    echo "<testcase name='${COMPNAME/\'}'></testcase>" >>$XMLPOL
                 fi
             fi
             ((INDEX++))
@@ -1196,7 +1196,7 @@ run_report() {
             echo "- Severity = $VULNSEV"
             echo "- Score = $VULNSCORE"
             echo "- Status = $VULNSTAT"
-            echo "- Component = $VULNCOMP/$VULNCOMPVER"
+            echo "- Component = ${VULNCOMP/\'}/${VULNCOMPVER/\'}"
             echo "See ${BD_URL}/api/vulnerabilities/$VULNNAME/overview"
             echo "'></error></testcase>" ) >>$XMLVULN
         done < $TEMPFILE2
