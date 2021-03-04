@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13e"
+output "Starting Detect Rescan wrapper v1.13f"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -368,6 +368,7 @@ proc_bom_files() {
         fi
         CKSUM=$(cat $bom | grep -v 'spdx:created' | grep -v 'uuid:' | sort | cksum | cut -f1 -d' ')
         FILE=$(basename $bom)
+        debug "proc_bom_files(): Checksum for '$FILE' is '$CKSUM'"
         BOM_FILES+=("${FILE}")
         BOM_HASHES+=("${CKSUM}")
         ((COUNT++))
@@ -828,22 +829,25 @@ proc_sigscan() {
 }
 
 cleanup() {
-    if [ ! -z "$RUNDIR" ]
+    if [ -z "$DEBUG" ]
     then
-        if [ -d "$RUNDIR/bdio" ]
+        if [ ! -z "$RUNDIR" ]
         then
-            rm -rf "$RUNDIR/bdio"
-            msg "Deleting $RUNDIR/bdio"
-        fi
-        if [ -d "$RUNDIR/extractions" ]
-        then
-            rm -rf "$RUNDIR/extractions"
-            msg "Deleting $RUNDIR/extractions"
-        fi
-        if [ -d "$RUNDIR/scan" ]
-        then
-            rm -rf "$RUNDIR/scan"
-            msg "Deleting $RUNDIR/scan"
+            if [ -d "$RUNDIR/bdio" ]
+            then
+                rm -rf "$RUNDIR/bdio"
+                msg "Deleting $RUNDIR/bdio"
+            fi
+            if [ -d "$RUNDIR/extractions" ]
+            then
+                rm -rf "$RUNDIR/extractions"
+                msg "Deleting $RUNDIR/extractions"
+            fi
+            if [ -d "$RUNDIR/scan" ]
+            then
+                rm -rf "$RUNDIR/scan"
+                msg "Deleting $RUNDIR/scan"
+            fi
         fi
     fi
 }
