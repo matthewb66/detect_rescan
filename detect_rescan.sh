@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13f"
+output "Starting Detect Rescan wrapper v1.13g"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
