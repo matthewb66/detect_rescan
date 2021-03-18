@@ -980,7 +980,7 @@ run_report() {
                 if [ $MODE_TESTXML -eq 1 ]
                 then
                     echo "<testcase name='${COMPNAME/\'}'>" >>$XMLPOL
-                    echo -n "<error message='${COMPNAME/\'}' violates the following policies: " >>$XMLPOL
+                    echo -n "<error message=\"'${COMPNAME/\'}' violates the following policies: " >>$XMLPOL	
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -1006,7 +1006,7 @@ run_report() {
                 done
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "'></error></testcase>" >>$XMLPOL
+                    echo '"></error></testcase>' >>$XMLPOL
                 fi
                 if [ $MODE_REPORT -eq 1 ]
                 then
