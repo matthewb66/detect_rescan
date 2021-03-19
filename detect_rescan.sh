@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13g"
+output "Starting Detect Rescan wrapper v1.14"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -1327,7 +1327,7 @@ while (( "$#" )); do
             shift; continue
             ;;
         --detectscript=*)
-            DETECT_SCRIPT=$(getarg "$1")
+            DETECT_SCRIPT=$(getargval "$1")
             debug "process_args(): DETECT_SCRIPT set to $DETECT_SCRIPT"
             if [ ! -r "$DETECT_SCRIPT" ]
             then
@@ -1336,12 +1336,12 @@ while (( "$#" )); do
             shift; continue
             ;;
         --sigtime=*)
-            SIGTIME=$(getarg "$1")
+            SIGTIME=$(getargval "$1")
             debug "process_args(): SIGTIME set to $SIGTIME"
             shift; continue
             ;;
         --curlopts=*)
-            CURLOPTS=$(getarg "$1")
+            CURLOPTS=$(getargval "$1")
             shift; continue
             ;;
 # Unsupported arguments
@@ -1380,7 +1380,7 @@ while (( "$#" )); do
             DETARGS="$DETARGS $(procarg $1)"
             ;;
         --detect.source.path=*)
-            SCANLOC=$(getarg $1)
+            SCANLOC=$(getargval $1)
             SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
             ;;
         --*)
