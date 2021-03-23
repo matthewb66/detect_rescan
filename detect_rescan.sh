@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.13f"
+output "Starting Detect Rescan wrapper v1.15"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -58,6 +58,7 @@ MODE_MARKDOWN=0
 MODE_PREVFILE=0
 MODE_TESTXML=0
 SIGTIME=86400
+DETECT_TIMEOUT=4800
 PREVSCANDATA=
 PROJEXISTS=0
 DETECT_SCRIPT=
@@ -657,7 +658,10 @@ wait_for_bom_completion() {
     # Check job status
 
     local loop=0
-    while [ $loop -lt 80 ]
+    local LOOPS=$((DETECT_TIMEOUT/15))
+    debug "wait_for_bom_completion(): Will wait for $LOOPS periods of 15 seconds"
+
+    while [ $loop -lt "$LOOPS" ]
     do
         debug "wait_for_bom_completion(): Waiting loop $loop"
         api_call "${1//\"}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
@@ -693,7 +697,9 @@ wait_for_bom_completion() {
 wait_for_scans() {
     local SCANURL=$(echo ${1//\"}| sed -e 's/ /%20/g')
     local loop=0
-    while [ $loop -lt 80 ]
+    local LOOPS=$((DETECT_TIMEOUT/15))
+    debug "wait_for_scans(): Will wait for $LOOPS periods of 15 seconds"
+    while [ $loop -lt "$LOOPS" ]
     do
         # Check scan status
         debug "wait_for_scans(): Waiting loop $loop"
@@ -979,8 +985,8 @@ run_report() {
                 fi
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'>" >>$XMLPOL
-                    echo -n "<error message='$COMPNAME violates the following policies: " >>$XMLPOL
+                    echo "<testcase name='${COMPNAME/\'}'>" >>$XMLPOL
+                    echo -n "<error message=\"'${COMPNAME/\'}' violates the following policies: " >>$XMLPOL	
                 fi
                 api_call ${COMPURL}/policy-rules
                 if [ $? -ne 0 ]
@@ -1006,7 +1012,7 @@ run_report() {
                 done
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "'></error></testcase>" >>$XMLPOL
+                    echo '"></error></testcase>' >>$XMLPOL
                 fi
                 if [ $MODE_REPORT -eq 1 ]
                 then
@@ -1016,7 +1022,7 @@ run_report() {
             else
                 if [ $MODE_TESTXML -eq 1 ]
                 then
-                    echo "<testcase name='$COMPNAME'></testcase>" >>$XMLPOL
+                    echo "<testcase name='${COMPNAME/\'}'></testcase>" >>$XMLPOL
                 fi
             fi
             ((INDEX++))
@@ -1116,7 +1122,7 @@ run_report() {
             echo "- Severity = $VULNSEV"
             echo "- Score = $VULNSCORE"
             echo "- Status = $VULNSTAT"
-            echo "- Component = $VULNCOMP/$VULNCOMPVER"
+            echo "- Component = ${VULNCOMP/\'}/${VULNCOMPVER/\'}"
             echo "See ${BD_URL}/api/vulnerabilities/$VULNNAME/overview"
             echo "'></error></testcase>" ) >>$XMLVULN
         done < $TEMPFILE2
@@ -1327,7 +1333,7 @@ while (( "$#" )); do
             shift; continue
             ;;
         --detectscript=*)
-            DETECT_SCRIPT=$(getarg "$1")
+            DETECT_SCRIPT=$(getargval "$1")
             debug "process_args(): DETECT_SCRIPT set to $DETECT_SCRIPT"
             if [ ! -r "$DETECT_SCRIPT" ]
             then
@@ -1336,12 +1342,12 @@ while (( "$#" )); do
             shift; continue
             ;;
         --sigtime=*)
-            SIGTIME=$(getarg "$1")
+            SIGTIME=$(getargval "$1")
             debug "process_args(): SIGTIME set to $SIGTIME"
             shift; continue
             ;;
         --curlopts=*)
-            CURLOPTS=$(getarg "$1")
+            CURLOPTS=$(getargval "$1")
             shift; continue
             ;;
 # Unsupported arguments
@@ -1380,8 +1386,12 @@ while (( "$#" )); do
             DETARGS="$DETARGS $(procarg $1)"
             ;;
         --detect.source.path=*)
-            SCANLOC=$(getarg $1)
+            SCANLOC=$(getargval $1)
             SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
+            ;;
+        --detect.timeout=*)
+            DETECT_TIMEOUT=$(getargval $1)
+            debug "process_args(): Timeout set to $DETECT_TIMEOUT"
             ;;
         --*)
             ;;
