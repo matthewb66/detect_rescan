@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.14"
+output "Starting Detect Rescan wrapper v1.15"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -58,6 +58,7 @@ MODE_MARKDOWN=0
 MODE_PREVFILE=0
 MODE_TESTXML=0
 SIGTIME=86400
+DETECT_TIMEOUT=4800
 PREVSCANDATA=
 PROJEXISTS=0
 DETECT_SCRIPT=
@@ -657,7 +658,10 @@ wait_for_bom_completion() {
     # Check job status
 
     local loop=0
-    while [ $loop -lt 80 ]
+    local LOOPS=$((DETECT_TIMEOUT/15))
+    debug "wait_for_bom_completion(): Will wait for $LOOPS periods of 15 seconds"
+
+    while [ $loop -lt "$LOOPS" ]
     do
         debug "wait_for_bom_completion(): Waiting loop $loop"
         api_call "${1//\"}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
@@ -693,7 +697,9 @@ wait_for_bom_completion() {
 wait_for_scans() {
     local SCANURL=$(echo ${1//\"}| sed -e 's/ /%20/g')
     local loop=0
-    while [ $loop -lt 80 ]
+    local LOOPS=$((DETECT_TIMEOUT/15))
+    debug "wait_for_scans(): Will wait for $LOOPS periods of 15 seconds"
+    while [ $loop -lt "$LOOPS" ]
     do
         # Check scan status
         debug "wait_for_scans(): Waiting loop $loop"
@@ -1382,6 +1388,10 @@ while (( "$#" )); do
         --detect.source.path=*)
             SCANLOC=$(getargval $1)
             SCANLOC=$(cd "$SCANLOC" 2>/dev/null; pwd)
+            ;;
+        --detect.timeout=*)
+            DETECT_TIMEOUT=$(getargval $1)
+            debug "process_args(): Timeout set to $DETECT_TIMEOUT"
             ;;
         --*)
             ;;
