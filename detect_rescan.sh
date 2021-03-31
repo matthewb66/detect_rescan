@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.15"
+output "Starting Detect Rescan wrapper v1.16"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -528,7 +528,7 @@ get_project() {
     debug "get_project(): ARG1=$1"
     #local SEARCHPROJ=$(echo ${1} | sed -e 's:/:%2F:g' -e 's/ /+/g')
     local SEARCHPROJ=$(encode_url ${1})
-    local MYURL="${BD_URL}/api/projects?q=name:${SEARCHPROJ}"
+    local MYURL="${BD_URL}/api/projects?q=name:${SEARCHPROJ}&limit=200"
     debug "get_project(): API_URL=$MYURL"
 
     api_call "$MYURL" 'application/vnd.blackducksoftware.project-detail-4+json'
@@ -575,7 +575,7 @@ get_project() {
 get_version() {
     # Get Version  - $1 = PROJURL
     local VERNAME=$(encode_url ${2} )
-    local API_URL="${1//\"}/versions?versionName%3A${VERNAME}"
+    local API_URL="${1//\"}/versions?versionName%3A${VERNAME}&limit=200"
     debug "get_version(): version URL is '$API_URL'"
     #local SEARCHVERSION="${2// /_}"
     #echo "get_version: SEARCHVERSION=$SEARCHVERSION" >&2
@@ -865,7 +865,7 @@ run_report() {
         return 1
     fi
 
-    api_call ${URL}/policy-status 'application/vnd.blackducksoftware.bill-of-materials-6+json'
+    api_call "${URL}/policy-status" 'application/vnd.blackducksoftware.bill-of-materials-6+json'
     if [ $? -ne 0 ]
     then
         return 1
@@ -988,21 +988,21 @@ run_report() {
                     echo "<testcase name='${COMPNAME/\'}'>" >>$XMLPOL
                     echo -n "<error message=\"'${COMPNAME/\'}' violates the following policies: " >>$XMLPOL	
                 fi
-                api_call ${COMPURL}/policy-rules
+                api_call "${COMPURL}/policy-rules"
                 if [ $? -ne 0 ]
                 then
                     continue
                 fi
             
-                local POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|' | escape_string )
-                local POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',' | escape_string )
+                local POLNAMES=$($JQ -r '.items[].name' $TEMPFILE 2>/dev/null | tr '\n' '|')
+                local POLSEVERITIES=$($JQ -r '.items[].severity' $TEMPFILE 2>/dev/null | tr '\n' ',')
                 IFS='|'
                 sevind=1
                 for polname in $POLNAMES
                 do
                     if [ $MODE_REPORT -eq 1 ]
                     then
-                        echo -n "'$polname' ($(echo $POLSEVERITIES|cut -f$sevind -d,)) "
+                        echo -n "$polname ($(echo $POLSEVERITIES|cut -f$sevind -d,)) "
                     fi
                     if [ $MODE_TESTXML -eq 1 ]
                     then
@@ -1046,28 +1046,28 @@ run_report() {
         fi
     fi
 
-    api_call ${URL}/risk-profile
+    api_call "${URL}/risk-profile"
     if [ $? -ne 0 ]
     then
         return 1
     fi
 
-    local VULNS=$($JQ -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @csv' $TEMPFILE 2>/dev/null)
-    local LICS=$($JQ -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @csv' $TEMPFILE 2>/dev/null)
-    local OPS=$($JQ -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @csv' $TEMPFILE 2>/dev/null)
+    local VULNS=$($JQ -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
+    local LICS=$($JQ -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
+    local OPS=$($JQ -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
     if [ $MODE_MARKDOWN -eq 1 ]
     then
-        local NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!')
-        local NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!')
-        local NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!')
+#         local NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!')
+#         local NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!')
+#         local NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!')
 
         ( echo
         echo "## Component Counts"
         echo "| CATEGORY | CRIT | HIGH | MED | LOW | None |"
         echo "|----------|------:|-------:|------:|------:|-------:|"
-        echo "| Vulnerability | ${NEWVULNS//;/ | } |"
-        echo "| License | - | ${NEWLICS//;/ | } |"
-        echo "| Op Risk | - | ${NEWOPS//;/ | } |"
+        echo "| Vulnerability | ${VULNS//|/ | } |"
+        echo "| License | - | ${LICS//|/ | } |"
+        echo "| Op Risk | - | ${OPS//|/ | } |"
         echo )>>$MARKDOWNFILE
     fi
     if [ $MODE_REPORT -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
@@ -1081,20 +1081,20 @@ run_report() {
     fi
     if [ $MODE_REPORT -eq 1 ]
     then
-        local VULN_LIST=$($JQ -r '.items[] | select(.vulnerabilityWithRemediation.severity == "CRITICAL" or .vulnerabilityWithRemediation.severity == "HIGH") | [.vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.cweId, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @csv' $TEMPFILE 2>/dev/null | sed -e 's/"//g' -e 's/,,/, ,/g' | sort -t , -n -k 3 -r)
+        local VULN_LIST=$($JQ -r '.items[] | select(.vulnerabilityWithRemediation.severity == "CRITICAL" or .vulnerabilityWithRemediation.severity == "HIGH") | [.vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.cweId, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @tsv' $TEMPFILE 2>/dev/null | sort -uk 1 -r | sed -e 's/	/|/g' )
         echo
         echo "Component Counts (Total = $COMPCOUNT):"
-        ( echo " ,CRIT,HIGH,MED ,LOW ,None"
-        echo " ,----,----,---,---,----"
-        echo "Vulnerability,${VULNS}"
-        echo "License,-,${LICS}"
-        echo "Op Risk,-,${OPS}"
-        echo ) | column -t -s ',' | sed -e 's/^/	/g'
+        ( echo "| |CRIT|HIGH|MED |LOW |None"
+        echo "| |----|----|---|---|----"
+        echo "|Vulnerability|${VULNS}"
+        echo "|License|-|${LICS}"
+        echo "|Op Risk|-|${OPS}"
+        echo ) | sed -e 's/^/|/g' | column -t -s '|'
 
         echo
         echo "Critical/High Vulnerabilities:"
-        (echo "Vuln ID,Score,Severity,Weakness,Status,Component,Component Version"
-        echo $VULN_LIST )| column -t -s ',' | sed -e 's/^/	/g'
+        (echo "Vuln ID|Score|Severity|Weakness|Status|Component|Component Version"
+        echo "$VULN_LIST" )| column -t -s '|'
         echo 
         echo "See Black Duck Project at:"
         echo "$URL/components"
@@ -1108,15 +1108,15 @@ run_report() {
         echo '<testsuite disabled="" errors="" failures="" hostname="" id="" name="Black Duck vulnerability status" package="" skipped="" tests="" time="" timestamp="">'
         echo '<properties><property name="" value=""/></properties>' ) >$XMLVULN
         rm -f $TEMPFILE2
-        $JQ -r '.items[] | [.vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @csv' $TEMPFILE | sed -e 's/"//g' | sort -t , -n -k 3 -r > $TEMPFILE2 2>/dev/null
+        $JQ -r '.items[] | [.vulnerabilityWithRemediation.vulnerabilityName, .vulnerabilityWithRemediation.severity, .vulnerabilityWithRemediation.overallScore, .vulnerabilityWithRemediation.remediationStatus, .componentName, .componentVersionName] | @tsv' $TEMPFILE | sort -uk 1 -r | sed -e 's/	/|/g' > $TEMPFILE2 2>/dev/null
         while read line
         do
-            local VULNNAME=$(echo $line | cut -f1 -d,)
-            local VULNSEV=$(echo $line | cut -f2 -d,)
-            local VULNSCORE=$(echo $line | cut -f3 -d,)
-            local VULNSTAT=$(echo $line | cut -f4 -d,)
-            local VULNCOMP=$(echo $line | cut -f5 -d,)
-            local VULNCOMPVER=$(echo $line | cut -f6 -d,)
+            local VULNNAME=$(echo $line | cut -f1 -d'|')
+            local VULNSEV=$(echo $line | cut -f2 -d'|')
+            local VULNSCORE=$(echo $line | cut -f3 -d'|')
+            local VULNSTAT=$(echo $line | cut -f4 -d'|')
+            local VULNCOMP=$(echo $line | cut -f5 -d'|')
+            local VULNCOMPVER=$(echo $line | cut -f6 -d'|')
 
             (echo "<testcase name='$VULNSEV - $VULNNAME'><error message='Vulnerability $VULNNAME:"
             echo "- Severity = $VULNSEV"
@@ -1138,7 +1138,7 @@ get_prev_scandata() {
     then
         debug "get_prev_scandata(): Using prevScanData custom field"
         local VURL=$1
-        api_call $VURL/custom-fields 'application/vnd.blackducksoftware.project-detail-5+json'
+        api_call "$VURL/custom-fields" 'application/vnd.blackducksoftware.project-detail-5+json'
         if [ $? -ne 0 ]
         then
             return 1
@@ -1234,7 +1234,7 @@ update_prevscandata() {
 
 get_scandata_url() {
     local VURL=${1//\"}
-    api_call ${VURL}/custom-fields 'application/vnd.blackducksoftware.project-detail-5+json'
+    api_call "${VURL}/custom-fields" 'application/vnd.blackducksoftware.project-detail-5+json'
     if [ $? -ne 0 ]
     then
         debug "get_scandata_url(): API error returned"
