@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.16a"
+output "Starting Detect Rescan wrapper v1.16b"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -1377,13 +1377,13 @@ while (( "$#" )); do
             then
                 YML=
             fi
-            DETARGS="$DETARGS $(procarg $1)"
+            # DETARGS="$DETARGS $(procarg $1)"
             ;;
         --blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*)
             DETECT_ACTION=1
             msg "Detect Action identified - will rerun Detect after upload and scan completion"
             debug "process_args(): Identified action argument $arg"
-            DETARGS="$DETARGS $(procarg $1)"
+            # DETARGS="$DETARGS $(procarg $1)"
             ;;
         --detect.source.path=*)
             SCANLOC=$(getargval $1)
