@@ -30,12 +30,13 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.16b"
+output "Starting Detect Rescan wrapper v1.17"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
 TEMPFILE2=$(mktemp -u)
 LOGFILE=$(mktemp -u)
+WAITTIME=90
 
 # ACTION_ARGS=--blackduck.timeout=*|--detect.force.success=*|--detect.notices.report=*|--detect.policy.check.fail.on.severities=*|--detect.risk.report.pdf=*|--detect.wait.for.results=*
 # UNSUPPORTED_ARGS='--detect.blackduck.signature.scanner.snippet.matching=*|--detect.blackduck.signature.scanner.upload.source.mode=*|--detect.blackduck.signature.scanner.copyright.search=*|--detect.blackduck.signature.scanner.license.search=*|--detect.binary.scan.*'
@@ -658,8 +659,8 @@ wait_for_bom_completion() {
     # Check job status
 
     local loop=0
-    local LOOPS=$((DETECT_TIMEOUT/15))
-    debug "wait_for_bom_completion(): Will wait for $LOOPS periods of 15 seconds"
+    local LOOPS=$((DETECT_TIMEOUT/WAITTIME))
+    debug "wait_for_bom_completion(): Will wait for $LOOPS periods of $WAITTIME seconds"
 
     while [ $loop -lt "$LOOPS" ]
     do
@@ -687,7 +688,7 @@ wait_for_bom_completion() {
             return 0
         fi
         echo -n '.'
-        sleep 15
+        sleep $WAITTIME
         ((loop++))
     done
     echo
@@ -697,8 +698,8 @@ wait_for_bom_completion() {
 wait_for_scans() {
     local SCANURL=$(echo ${1//\"}| sed -e 's/ /%20/g')
     local loop=0
-    local LOOPS=$((DETECT_TIMEOUT/15))
-    debug "wait_for_scans(): Will wait for $LOOPS periods of 15 seconds"
+    local LOOPS=$((DETECT_TIMEOUT/WAITTIME)
+    debug "wait_for_scans(): Will wait for $LOOPS periods of $WAITTIME seconds"
     while [ $loop -lt "$LOOPS" ]
     do
         # Check scan status
@@ -735,7 +736,7 @@ wait_for_scans() {
         fi
         ((loop++))
         echo -n '.'
-        sleep 15
+        sleep $WAITTIME
     done
     return 1
 }
