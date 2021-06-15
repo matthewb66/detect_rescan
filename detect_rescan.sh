@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.16b"
+output "Starting Detect Rescan wrapper v1.18"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -59,6 +59,7 @@ MODE_PREVFILE=0
 MODE_TESTXML=0
 SIGTIME=86400
 DETECT_TIMEOUT=4800
+POLLTIME=90
 PREVSCANDATA=
 PROJEXISTS=0
 DETECT_SCRIPT=
@@ -490,6 +491,7 @@ api_call() {
         HEADER="$2"
     fi
     rm -f $TEMPFILE
+    debug "api_call(): API call is $1"
     curl $CURLOPTS -s -X GET --header "Authorization: Bearer $TOKEN" "$1" 2>/dev/null >$TEMPFILE
     RET=$?
     if [ $RET -ne 0 ] || [ ! -r $TEMPFILE ]
@@ -655,15 +657,19 @@ get_projver() {
 }
 
 wait_for_bom_completion() {
+    return 0
     # Check job status
 
-    local loop=0
-    local LOOPS=$((DETECT_TIMEOUT/15))
-    debug "wait_for_bom_completion(): Will wait for $LOOPS periods of 15 seconds"
+    local loop=1
+#     local LOOPS=$(( DETECT_TIMEOUT / $POLLTIME ))
+    debug "wait_for_bom_completion(): Will poll for maximum $DETECT_TIMEOUT seconds"
+    local LOOPTIME=0
+    local CURPOLLTIME=$POLLTIME
 
-    while [ $loop -lt "$LOOPS" ]
+#     while [ $loop -lt "$LOOPS" ]
+    while [ $LOOPTIME -le "$DETECT_TIMEOUT" ]
     do
-        debug "wait_for_bom_completion(): Waiting loop $loop"
+        debug "wait_for_bom_completion(): Waiting loop $loop - wait $CURPOLLTIME seconds"
         api_call "${1//\"}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
         if [ $? -ne 0 ]
         then
@@ -679,6 +685,7 @@ wait_for_bom_completion() {
                 STATUS='true'
             fi
         fi
+        debug "wait_for_bom_completion(): Status is $STATUS"
 
         if [ "$STATUS" == "true" ]
         then
@@ -687,7 +694,18 @@ wait_for_bom_completion() {
             return 0
         fi
         echo -n '.'
-        sleep 15
+        sleep $CURPOLLTIME
+        let "CURPOLLTIME = CURPOLLTIME + CURPOLLTIME"
+        let "NEWLOOPTIME = LOOPTIME + CURPOLLTIME"
+        if [ $LOOPTIME -ge $DETECT_TIMEOUT ]
+        then
+            break
+        elif [ $NEWLOOPTIME -gt $DETECT_TIMEOUT ]
+        then
+            LOOPTIME=$DETECT_TIMEOUT
+        else
+            LOOPTIME=$NEWLOOPTIME
+        fi
         ((loop++))
     done
     echo
@@ -696,13 +714,17 @@ wait_for_bom_completion() {
 
 wait_for_scans() {
     local SCANURL=$(echo ${1//\"}| sed -e 's/ /%20/g')
-    local loop=0
-    local LOOPS=$((DETECT_TIMEOUT/15))
-    debug "wait_for_scans(): Will wait for $LOOPS periods of 15 seconds"
-    while [ $loop -lt "$LOOPS" ]
+    local loop=1
+#     local LOOPS=$(( DETECT_TIMEOUT / POLLTIME ))
+    debug "wait_for_scans(): Will poll for maximum $DETECT_TIMEOUT seconds"
+
+    local LOOPTIME=0
+    local CURPOLLTIME=$POLLTIME
+#     while [ $loop -lt "$LOOPS" ]
+    while [ $LOOPTIME -le "$DETECT_TIMEOUT" ]
     do
         # Check scan status
-        debug "wait_for_scans(): Waiting loop $loop"
+        debug "wait_for_scans(): Waiting loop $loop - wait $CURPOLLTIME seconds"
         api_call "${SCANURL}" 'application/vnd.blackducksoftware.scan-4+json'
         if [ $? -ne 0 ]
         then
@@ -716,6 +738,7 @@ wait_for_scans() {
         local IFS=,
         for stat in $STATUSES 
         do
+            debug "wait_for_scans(): STATUS is $stat"
             IFS=
             OPCODE=$(echo $OPCODES | cut -f$index -d,)
             ((index++))
@@ -733,9 +756,21 @@ wait_for_scans() {
             debug "wait_for_scans(): ServerScanning field marked as COMPLETED"
             return 0
         fi
-        ((loop++))
         echo -n '.'
-        sleep 15
+        sleep $CURPOLLTIME
+        let "CURPOLLTIME = CURPOLLTIME + CURPOLLTIME"
+        let "NEWLOOPTIME = LOOPTIME + CURPOLLTIME"
+        if [ $LOOPTIME -ge $DETECT_TIMEOUT ]
+        then
+            break
+        elif [ $NEWLOOPTIME -gt $DETECT_TIMEOUT ]
+        then
+            LOOPTIME=$DETECT_TIMEOUT
+        else
+            LOOPTIME=$NEWLOOPTIME
+        fi
+        ((loop++))
+
     done
     return 1
 }
