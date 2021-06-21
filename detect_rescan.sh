@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.18"
+output "Starting Detect Rescan wrapper v1.19"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -54,18 +54,18 @@ DETECT_PROJECT=0
 DETECT_VERSION=0
 MODE_QUIET=0
 MODE_REPORT=0
-MODE_MARKDOWN=0
 MODE_PREVFILE=0
 MODE_TESTXML=0
 SIGTIME=86400
 DETECT_TIMEOUT=4800
-POLLTIME=90
+POLLTIME=15
 PREVSCANDATA=
 PROJEXISTS=0
 DETECT_SCRIPT=
 MODE_RESET=0
 JQTEMPDIR=
 JQ=
+COLUMN=column
 
 UNSUPPORTED=0
 
@@ -178,6 +178,12 @@ prereqs() {
             ret=1
         fi
     done
+    hash $COLUMN  >/dev/null 2>&1
+    if [ $? -ne 0 ]
+    then
+        COLUMN=''
+        debug "prereqs(): column program missing"
+    fi
     debug "prereqs(): Returning $ret"
     return $ret
 }
@@ -520,6 +526,7 @@ api_call() {
             return 1
         fi
     fi
+#     $JQ . $TEMPFILE  >&2
     #debug "api_call(): $COUNT records identified in API response"
 
     return 0
@@ -656,45 +663,73 @@ get_projver() {
     return 0
 }
 
+get_user() {
+    debug "get_user(): Getting user"
+    api_call "${BD_URL}/api/current-user" "application/vnd.blackducksoftware.user-4+json"
+    if [ $? -ne 0 ]
+    then
+        debug "get_user(): api_call() returned failure"
+        return ''
+    fi
+#     ${JQ} . $TEMPFILE >&2
+    local USERURL=$($JQ -r '._meta.href' $TEMPFILE 2>/dev/null)
+    debug "get_user(): User URL is ${USERURL//\"}"
+    echo ${USERURL//\"}
+}
+
 wait_for_bom_completion() {
-    return 0
-    # Check job status
+    # $1 is versionURL
+    local VERURL=$1
+    local USERURL=$(get_user)
+    debug "wait_for_bom_completion(): User URL is '$USERURL'"
+    if [ -z "$USERURL" -o "$USERURL" == '' ]
+    then
+        return 0
+    fi
+
+    # Check BOM status
+# https://poc39.blackduck.synopsys.com/api/users/1735454c-0fcd-431d-ab6e-38ce189acb0e/notifications?
+# filter=notificationType%3AVERSION_BOM_CODE_LOCATION_BOM_COMPUTED&limit=100&offset=0&endDate=2021-06-20T15%3A47%3A52.414Z&startDate=2021-06-17T15%3A45%3A30.573Z
+    local APIURL="${USERURL}/notifications"
+    APIURL="${APIURL}?filter=notificationType%3AVERSION_BOM_CODE_LOCATION_BOM_COMPUTED&limit=100&offset=0"
 
     local loop=1
-#     local LOOPS=$(( DETECT_TIMEOUT / $POLLTIME ))
     debug "wait_for_bom_completion(): Will poll for maximum $DETECT_TIMEOUT seconds"
     local LOOPTIME=0
     local CURPOLLTIME=$POLLTIME
+    local CURDATE=$(date -u "-v-${POLLTIME}S" '+%Y-%m-%dT%H%%3A%M%%3A%S.000Z')
+    local BOMCOMPLETE=false
 
-#     while [ $loop -lt "$LOOPS" ]
     while [ $LOOPTIME -le "$DETECT_TIMEOUT" ]
     do
         debug "wait_for_bom_completion(): Waiting loop $loop - wait $CURPOLLTIME seconds"
-        api_call "${1//\"}/bom-status" 'application/vnd.blackducksoftware.internal-1+json'
+        PREVDATE=$CURDATE
+        CURDATE=$(date -u '+%Y-%m-%dT%H%%3A%M%%3A%S.000Z')
+
+        api_call "${APIURL}&endDate=${CURDATE}&startDate=${PREVDATE}" 'application/vnd.blackducksoftware.notification-4+json'
         if [ $? -ne 0 ]
         then
             debug "wait_for_bom_completion(): api_call() returned failure"
             return 1
         fi
-        local STATUS=$($JQ -r '.upToDate' $TEMPFILE 2>/dev/null)
-        if [ "$STATUS" == 'null' ]
-        then
-            STATUS=$($JQ -r '.status' $TEMPFILE 2>/dev/null)
-            if [ "$STATUS" == 'UP_TO_DATE' ]
-            then
-                STATUS='true'
-            fi
-        fi
-        debug "wait_for_bom_completion(): Status is $STATUS"
 
-        if [ "$STATUS" == "true" ]
+        local COUNT=$($JQ -r '.totalCount' $TEMPFILE 2>/dev/null)
+#         $JQ . $TEMPFILE
+        if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]
         then
-            debug "wait_for_bom_completion(): upToDate status returned true"
-            echo
-            return 0
+            for url in $($JQ -r '[.items[].content.projectVersion]|@tsv' $TEMPFILE 2>/dev/null)
+            do
+                if [ "${url//\"}" == "$VERURL" ]
+                then
+                    debug "wait_for_bom_completion(): bomcompletion event found"
+                    echo
+                    return 0
+                fi
+            done
         fi
         echo -n '.'
         sleep $CURPOLLTIME
+
         let "CURPOLLTIME = CURPOLLTIME + CURPOLLTIME"
         let "NEWLOOPTIME = LOOPTIME + CURPOLLTIME"
         if [ $LOOPTIME -ge $DETECT_TIMEOUT ]
@@ -905,17 +940,7 @@ run_report() {
     then
         return 1
     fi
-    
-    local MARKDOWNFILE=$SCANLOC/blackduck.md
 
-    if [ $MODE_MARKDOWN -eq 1 ]
-    then
-        PROJURL=$(echo $URL | sed -e 's!/versions.*$!!')
-        ( echo
-        echo "# BLACK DUCK OSS SUMMARY REPORT"
-        echo "Project: '[$PROJECT]($PROJURL)' Version: '[$VERSION]($VERURL)'"
-        echo ) >$MARKDOWNFILE
-    fi
     if [ $MODE_REPORT -eq 1 ]
     then
         echo
@@ -929,13 +954,6 @@ run_report() {
     then
         POL_TYPES=$($JQ -r '.componentVersionStatusCounts[].name' $TEMPFILE 2>/dev/null | tr '\n' ',')
         POL_STATS=$($JQ -r '.componentVersionStatusCounts[].value' $TEMPFILE 2>/dev/null | tr '\n' ',')
-        if [ $MODE_MARKDOWN -eq 1 ]
-        then
-            ( echo "## Component Policy Status:"
-            echo
-            echo "| Component Policy Status | Count |"
-            echo "|-------------------------|-------:|" ) >>$MARKDOWNFILE
-        fi
         if [ $MODE_REPORT -eq 1 ]
         then
             echo Component Policy Status:
@@ -948,19 +966,6 @@ run_report() {
             IFS=
             POL_STAT=$(echo $POL_STATS | cut -f$INDEX -d,)
             COMPCOUNT=$(($COMPCOUNT+$POL_STAT))
-            if [ $MODE_MARKDOWN -eq 1 ]
-            then
-                if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
-                then
-                    echo "| In Violation Overidden | [$POL_STAT]($URL/components?filter=bomPolicy%3Ain_violation_overridden) |" >>$MARKDOWNFILE
-                elif [ "$type" == "NOT_IN_VIOLATION" ]
-                then
-                    echo "| Not In Violation | $POL_STAT |" >>$MARKDOWNFILE
-                elif [ "$type" == "IN_VIOLATION" ]
-                then
-                    echo "| In Violation | [$POL_STAT]($URL/components?filter=bomPolicy%3Ain_violation) |" >>$MARKDOWNFILE
-                fi
-            fi
             if [ $MODE_REPORT -eq 1 ]
             then
                 if [ "$type" == "IN_VIOLATION_OVERRIDDEN" ]
@@ -1074,11 +1079,6 @@ run_report() {
             echo Component Policy Status:
             echo " - No policy violations"
         fi
-        if [ $MODE_MARKDOWN -eq 1 ]
-        then
-            ( echo "## Component Policy Status:"
-            echo"- No policy violations" ) >>$MARKDOWNFILE
-        fi
     fi
 
     api_call "${URL}/risk-profile"
@@ -1090,21 +1090,6 @@ run_report() {
     local VULNS=$($JQ -r '.categories | [.VULNERABILITY.CRITICAL, .VULNERABILITY.HIGH, .VULNERABILITY.MEDIUM, .VULNERABILITY.LOW, .VULNERABILITY.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
     local LICS=$($JQ -r '.categories | [.LICENSE.HIGH, .LICENSE.MEDIUM, .LICENSE.LOW, .LICENSE.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
     local OPS=$($JQ -r '.categories | [.OPERATIONAL.HIGH, .OPERATIONAL.MEDIUM, .OPERATIONAL.LOW, .OPERATIONAL.OK] | @tsv' $TEMPFILE 2>/dev/null | sed -e 's/	/|/g' )
-    if [ $MODE_MARKDOWN -eq 1 ]
-    then
-#         local NEWVULNS=$(echo $VULNS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Acritical);\[!' -e 's!,!\]('${URL}'/components?filter=securityRisk%3Ahigh);\[!')
-#         local NEWLICS=$(echo $LICS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=licenseRisk%3Ahigh);\[!')
-#         local NEWOPS=$(echo $OPS | sed -e 's/^/\[/' -e 's!,!\]('${URL}'/components?filter=operationalRisk%3Ahigh);\[!')
-
-        ( echo
-        echo "## Component Counts"
-        echo "| CATEGORY | CRIT | HIGH | MED | LOW | None |"
-        echo "|----------|------:|-------:|------:|------:|-------:|"
-        echo "| Vulnerability | ${VULNS//|/ | } |"
-        echo "| License | - | ${LICS//|/ | } |"
-        echo "| Op Risk | - | ${OPS//|/ | } |"
-        echo )>>$MARKDOWNFILE
-    fi
     if [ $MODE_REPORT -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
     then
         api_call "${URL}/vulnerable-bom-components?limit=5000&sort=severity" 'application/vnd.blackducksoftware.bill-of-materials-6+json'
@@ -1124,12 +1109,12 @@ run_report() {
         echo "|Vulnerability|${VULNS}"
         echo "|License|-|${LICS}"
         echo "|Op Risk|-|${OPS}"
-        echo ) | sed -e 's/^/|/g' | column -t -s '|'
+        echo ) | sed -e 's/^/|/g' | $COLUMN -t -s '|'
 
         echo
         echo "Critical/High Vulnerabilities:"
         (echo "Vuln ID|Score|Severity|Weakness|Status|Component|Component Version"
-        echo "$VULN_LIST" )| column -t -s '|'
+        echo "$VULN_LIST" )| $COLUMN -t -s '|'
         echo 
         echo "See Black Duck Project at:"
         echo "$URL/components"
@@ -1338,18 +1323,18 @@ while (( "$#" )); do
             ;;
 # Arguments NOT to be passed to detect.sh
         --report)
-            debug "process_args(): MODE_REPORT set"
-            MODE_REPORT=1
+            if [ "$COLUMN" == 'column' ]
+            then
+                debug "process_args(): MODE_REPORT set"
+                MODE_REPORT=1
+            else
+                debug "process_args(): MODE_REPORT not set - column command missing"
+            fi
             shift; continue
             ;;
         --quiet)
             debug "process_args(): MODE_QUIET set"
             MODE_QUIET=1
-            shift; continue
-            ;;
-        --markdown)
-            debug "process_args(): MODE_MARKDOWN set"
-            MODE_MARKDOWN=1
             shift; continue
             ;;
         --file)
@@ -1532,7 +1517,7 @@ else
     output "Not processing Signature scan as time since last scan not exceeded"
 fi
 
-if [ $UPDATE_PREVSCANDATA -eq 1 -a -z "$VERURL" -a $MODE_PREVFILE -eq 0 ] || [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ] 
+if [ $UPDATE_PREVSCANDATA -eq 1 -a -z "$VERURL" -a $MODE_PREVFILE -eq 0 ] || [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ]
 then
 # Need to locate project after scan to update custom field
     msg "Checking for project version after scan"
@@ -1544,7 +1529,7 @@ then
 fi
 
 RETURN=0
-if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ]
+if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ]
 then
     echo -n "detect_rescan: Waiting for BOM completion: ..."
     if [ ! -z "$CLNAME" ]
@@ -1585,7 +1570,7 @@ then
     update_prevscandata $SIGDATE $SCANFIELDURL
 fi
 
-if [ $MODE_REPORT -eq 1 ] || [ $MODE_MARKDOWN -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
+if [ $MODE_REPORT -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
 then
     run_report $VERURL
 fi
