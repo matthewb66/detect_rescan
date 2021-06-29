@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.19"
+output "Starting Detect Rescan wrapper v1.20"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -58,7 +58,7 @@ MODE_PREVFILE=0
 MODE_TESTXML=0
 SIGTIME=86400
 DETECT_TIMEOUT=4800
-POLLTIME=15
+POLLTIME=30
 PREVSCANDATA=
 PROJEXISTS=0
 DETECT_SCRIPT=
@@ -697,7 +697,7 @@ wait_for_bom_completion() {
     debug "wait_for_bom_completion(): Will poll for maximum $DETECT_TIMEOUT seconds"
     local LOOPTIME=0
     local CURPOLLTIME=$POLLTIME
-    local CURDATE=$(date -u "-v-${POLLTIME}S" '+%Y-%m-%dT%H%%3A%M%%3A%S.000Z')
+    local CURDATE=$STARTDATE
     local BOMCOMPLETE=false
 
     while [ $LOOPTIME -le "$DETECT_TIMEOUT" ]
@@ -737,6 +737,7 @@ wait_for_bom_completion() {
             break
         elif [ $NEWLOOPTIME -gt $DETECT_TIMEOUT ]
         then
+            let "CURPOLLTIME = DETECT_TIMEOUT - LOOPTIME"
             LOOPTIME=$DETECT_TIMEOUT
         else
             LOOPTIME=$NEWLOOPTIME
@@ -878,7 +879,7 @@ proc_sigscan() {
             return 1 # No sig scan
         fi
         debug "proc_sigscan(): Processing sig scan file $SIGFOLDER/data/$sig"
-#        output "Signature Scan - Uploading ..."
+        #output "Signature Scan - Uploading ..."
         curl $CURLOPTS -s -X POST "${BD_URL}/api/scan/data/?mode=replace" \
         -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/ld+json' \
@@ -1234,9 +1235,6 @@ update_prevscandata() {
             SCANDATA="${SCANDATA}|SIG:$SIGDATE"
         fi
         VAL='{"values": [ "'$SCANDATA'"] }'
-        #echo "update_prevscandata: VAL=$VAL" >&2
-        #echo "update_prevscandata: URL=$URL" >&2 
-        #echo "update_prevscandata: curl -X PUT --header \"Authorization: Bearer $TOKEN\" --header \"Content-Type: application/vnd.blackducksoftware.project-detail-5+json\" -d '$VAL' $URL"
         curl $CURLOPTS -s -X PUT --header "Authorization: Bearer $TOKEN" --header "Content-Type: application/vnd.blackducksoftware.project-detail-5+json" --header "Accept: application/vnd.blackducksoftware.project-detail-5+json" -d "$VAL" $URL >$TEMPFILE 2>&1 
         if [ $? -ne 0 ]
         then
@@ -1439,6 +1437,7 @@ TOKEN=$(get_token)
 
 debug "Running Detect offline"
 
+STARTDATE=$(date -u '+%Y-%m-%dT%H%%3A%M%%3A%S.000Z')
 run_detect_offline
 if [ $? -ne 0 ]
 then
@@ -1529,47 +1528,47 @@ then
 fi
 
 RETURN=0
-if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ]
-then
-    echo -n "detect_rescan: Waiting for BOM completion: ..."
-    if [ ! -z "$CLNAME" ]
-    then
-        debug "Waiting for sig scan code location scan ..."
-        wait_for_scans "${BD_URL}/api/codelocations?q=name:${CLNAME}"
-        if [ $? -ne 0 ]
-        then
-            error2 "wait_for_scans() for sig scan returned error"
-        fi
-    fi
-    debug "Waiting for version scans ..."
-    wait_for_scans "${VERURL//\"}/codelocations"
-    if [ $? -ne 0 ]
-    then
-        error2 "wait_for_scans() for version returned error"
-    fi
-    wait_for_bom_completion $VERURL
-    if [ $? -ne 0 ]
-    then
-        error2 "wait_for_bom_completion() returned error"
-    fi
-    if [ $DETECT_ACTION -eq 1 ]
-    then
-        run_detect_action
-        RETURN=$?
-        if [ $RETURN -ne 0 ]
-        then
-            output "Detect returned code $RETURN"
-        fi
-    fi
-fi
-
 if [ $UPDATE_PREVSCANDATA -eq 1 ]
 then
+    if [ $DETECT_ACTION -eq 1 ] || [ $MODE_REPORT -eq 1 ]
+    then
+        echo -n "detect_rescan: Waiting for project completion: ..."
+        if [ ! -z "$CLNAME" ]
+        then
+            debug "Waiting for sig scan code location scan ..."
+            wait_for_scans "${BD_URL}/api/codelocations?q=name:${CLNAME}"
+            if [ $? -ne 0 ]
+            then
+                error2 "wait_for_scans() for sig scan returned error"
+            fi
+        fi
+        debug "Waiting for version scans ..."
+        wait_for_scans "${VERURL//\"}/codelocations"
+        if [ $? -ne 0 ]
+        then
+            error2 "wait_for_scans() for version returned error"
+        fi
+        wait_for_bom_completion $VERURL
+        if [ $? -ne 0 ]
+        then
+            error2 "wait_for_bom_completion() returned error"
+        fi
+    fi
+
     msg "Updating scan data for next run ..."
     SCANFIELDURL=$(get_scandata_url $VERURL)
     update_prevscandata $SIGDATE $SCANFIELDURL
 fi
 
+if [ $DETECT_ACTION -eq 1 ]
+then
+    run_detect_action
+    RETURN=$?
+    if [ $RETURN -ne 0 ]
+    then
+        output "Detect returned code $RETURN"
+    fi
+fi
 if [ $MODE_REPORT -eq 1 ] || [ $MODE_TESTXML -eq 1 ]
 then
     run_report $VERURL
