@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.20"
+output "Starting Detect Rescan wrapper v1.21"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -706,7 +706,7 @@ wait_for_bom_completion() {
         PREVDATE=$CURDATE
         CURDATE=$(date -u '+%Y-%m-%dT%H%%3A%M%%3A%S.000Z')
 
-        api_call "${APIURL}&endDate=${CURDATE}&startDate=${PREVDATE}" 'application/vnd.blackducksoftware.notification-4+json'
+        api_call "${APIURL}&endDate=${CURDATE}&startDate=${STARTDATE}" 'application/vnd.blackducksoftware.notification-4+json'
         if [ $? -ne 0 ]
         then
             debug "wait_for_bom_completion(): api_call() returned failure"
@@ -801,6 +801,7 @@ wait_for_scans() {
             break
         elif [ $NEWLOOPTIME -gt $DETECT_TIMEOUT ]
         then
+            let "CURPOLLTIME = DETECT_TIMEOUT - LOOPTIME"
             LOOPTIME=$DETECT_TIMEOUT
         else
             LOOPTIME=$NEWLOOPTIME
