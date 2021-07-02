@@ -30,7 +30,7 @@ output() {
     echo "detect_rescan: $*"
 }
  
-output "Starting Detect Rescan wrapper v1.21"
+output "Starting Detect Rescan wrapper v1.22"
 
 DETECT_TMP=$(mktemp -u)
 TEMPFILE=$(mktemp -u)
@@ -717,16 +717,20 @@ wait_for_bom_completion() {
 #         $JQ . $TEMPFILE
         if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]
         then
-            for url in $($JQ -r '[.items[].content.projectVersion]|@tsv' $TEMPFILE 2>/dev/null)
+            local IFS=,
+            for url in $($JQ -r '[.items[].content.projectVersion]|@csv' $TEMPFILE 2>/dev/null)
             do
                 if [ "${url//\"}" == "$VERURL" ]
                 then
+                    unset IFS
                     debug "wait_for_bom_completion(): bomcompletion event found"
                     echo
                     return 0
                 fi
             done
+            unset IFS
         fi
+
         echo -n '.'
         sleep $CURPOLLTIME
 
